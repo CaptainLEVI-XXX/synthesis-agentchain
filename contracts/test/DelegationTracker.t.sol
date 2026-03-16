@@ -81,13 +81,13 @@ contract DelegationTrackerTest is Test {
     function test_registerTask_duplicateFails() public {
         _createTask();
         vm.prank(user);
-        vm.expectRevert("Task already exists");
+        vm.expectRevert(abi.encodeWithSelector(DelegationTracker.TaskAlreadyExists.selector, TASK_ID));
         tracker.registerTask(TASK_ID, block.timestamp + 1 days, 500e6);
     }
 
     function test_registerTask_pastDeadlineFails() public {
         vm.prank(user);
-        vm.expectRevert("Deadline in past");
+        vm.expectRevert(DelegationTracker.DeadlineInPast.selector);
         tracker.registerTask(TASK_ID, block.timestamp - 1, 500e6);
     }
 
@@ -112,14 +112,14 @@ contract DelegationTrackerTest is Test {
     function test_claimTask_unregisteredFails() public {
         _createTask();
         vm.prank(user); // not registered as agent
-        vm.expectRevert("Not a registered agent");
+        vm.expectRevert(abi.encodeWithSelector(DelegationTracker.NotRegisteredAgent.selector, user));
         tracker.claimTask(TASK_ID);
     }
 
     function test_claimTask_alreadyClaimedFails() public {
         _createAndClaimTask();
         vm.prank(orchestrator);
-        vm.expectRevert("Task not open");
+        vm.expectRevert(DelegationTracker.TaskNotOpen.selector);
         tracker.claimTask(TASK_ID);
     }
 
@@ -139,7 +139,7 @@ contract DelegationTrackerTest is Test {
         _createAndClaimTask();
 
         vm.prank(user); // not the enforcer
-        vm.expectRevert("Not caveat enforcer");
+        vm.expectRevert(abi.encodeWithSelector(DelegationTracker.NotCaveatEnforcer.selector, user));
         tracker.recordDelegation(TASK_ID, orchestrator, subAgent1, 1, keccak256("del-1"), 80e6);
     }
 
@@ -157,7 +157,7 @@ contract DelegationTrackerTest is Test {
         _createAndClaimTask();
 
         vm.prank(enforcerAddr);
-        vm.expectRevert("Fee exceeds pool");
+        vm.expectRevert(abi.encodeWithSelector(DelegationTracker.FeeExceedsPool.selector, 600e6, 500e6));
         tracker.recordDelegation(TASK_ID, orchestrator, subAgent1, 1, keccak256("del-1"), 600e6); // pool is 500
     }
 
@@ -182,7 +182,7 @@ contract DelegationTrackerTest is Test {
         _createTask(); // Open, not Accepted
 
         vm.prank(enforcerAddr);
-        vm.expectRevert("Task not accepted");
+        vm.expectRevert(DelegationTracker.TaskNotAccepted.selector);
         tracker.recordDelegation(TASK_ID, orchestrator, subAgent1, 1, keccak256("del-1"), 80e6);
     }
 
@@ -206,7 +206,7 @@ contract DelegationTrackerTest is Test {
         _createAndClaimTask();
 
         vm.prank(subAgent1); // not delegated
-        vm.expectRevert("Not a delegated agent for this task");
+        vm.expectRevert(abi.encodeWithSelector(DelegationTracker.NotDelegatedAgent.selector, subAgent1));
         tracker.submitWorkRecord(TASK_ID, keccak256("result-1"), "Sneaky");
     }
 
@@ -218,7 +218,7 @@ contract DelegationTrackerTest is Test {
 
         vm.startPrank(subAgent1);
         tracker.submitWorkRecord(TASK_ID, keccak256("result-1"), "First");
-        vm.expectRevert("Already submitted");
+        vm.expectRevert(abi.encodeWithSelector(DelegationTracker.WorkAlreadySubmitted.selector, subAgent1));
         tracker.submitWorkRecord(TASK_ID, keccak256("result-2"), "Second");
         vm.stopPrank();
     }
@@ -239,7 +239,7 @@ contract DelegationTrackerTest is Test {
         _createAndClaimTask();
 
         vm.prank(user);
-        vm.expectRevert("Not arbiter");
+        vm.expectRevert(abi.encodeWithSelector(DelegationTracker.NotArbiterError.selector, user));
         tracker.settleTask(TASK_ID);
     }
 
@@ -258,7 +258,7 @@ contract DelegationTrackerTest is Test {
     function test_expireTask_notExpiredYetFails() public {
         _createTask();
 
-        vm.expectRevert("Not expired yet");
+        vm.expectRevert(DelegationTracker.NotExpiredYet.selector);
         tracker.expireTask(TASK_ID);
     }
 
@@ -269,7 +269,7 @@ contract DelegationTrackerTest is Test {
         tracker.settleTask(TASK_ID);
 
         vm.warp(block.timestamp + 2 days);
-        vm.expectRevert("Task already finalized");
+        vm.expectRevert(DelegationTracker.TaskAlreadyFinalized.selector);
         tracker.expireTask(TASK_ID);
     }
 
@@ -277,14 +277,14 @@ contract DelegationTrackerTest is Test {
 
     function test_initialize_onlyDeployer() public {
         DelegationTracker t2 = new DelegationTracker();
-        vm.expectRevert("Not deployer");
+        vm.expectRevert(abi.encodeWithSelector(DelegationTracker.NotDeployer.selector, user));
         vm.prank(user);
         t2.initialize(enforcerAddr, arbiterAddr, address(registry));
     }
 
     function test_initialize_onlyOnce() public {
         vm.prank(deployer);
-        vm.expectRevert("Already initialized");
+        vm.expectRevert(DelegationTracker.AlreadyInitialized.selector);
         tracker.initialize(enforcerAddr, arbiterAddr, address(registry));
     }
 }
