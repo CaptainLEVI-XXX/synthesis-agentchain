@@ -16,14 +16,14 @@ import {CustomRevert} from "./libraries/CustomRevert.sol";
 contract AgentCapabilityEnforcer is CaveatEnforcer {
     using CustomRevert for bytes4;
 
-    // ─── Custom Errors ─────────────────────────────────────
+    // ─── Custom Errors 
 
     error AgentNotRegistered(address agent);
     error StakeInsufficient(address agent, uint256 required, uint256 actual);
     error MissingCapabilities(address agent);
     error MaxDepthReached(uint8 current, uint8 max);
 
-    // ─── State ─────────────────────────────────────────────
+    // ─── State 
 
     IAgentRegistry public immutable registry;
     IDelegationTracker public immutable tracker;
@@ -40,7 +40,7 @@ contract AgentCapabilityEnforcer is CaveatEnforcer {
         bytes32[] requiredCaps;
     }
 
-    // ─── Events ────────────────────────────────────────────
+    // ─── Events 
 
     event AgentDelegationValidated(
         bytes32 indexed delegationHash,
