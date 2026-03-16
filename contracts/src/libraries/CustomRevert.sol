@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.23;
 
 /// @title Gas-efficient custom error reverts using assembly
 /// @dev Usage: `using CustomRevert for bytes4;` then `ErrorName.selector.revertWith()`

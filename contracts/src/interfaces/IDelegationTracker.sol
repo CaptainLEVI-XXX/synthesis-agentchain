@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.23;
 
 interface IDelegationTracker {
     function recordDelegation(bytes32 taskId, address from, address to, uint8 depth, bytes32 delegationHash, uint256 fee) external;
