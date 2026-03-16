@@ -1,0 +1,20 @@
+# Foundry
+contracts/cache/
+contracts/out/
+
+# Ignores development broadcast logs
+!/contracts/broadcast
+contracts/broadcast/*/31337/
+contracts/broadcast/**/dry-run/
+
+
+# SDK
+sdk/node_modules/
+sdk/dist/
+
+# Dotenv files
+.env
+contracts/.env
+
+.claude
+docs/hackathon-credentials.md
