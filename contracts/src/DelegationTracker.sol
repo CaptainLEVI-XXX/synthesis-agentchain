@@ -1,13 +1,32 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-interface IAgentRegistry {
-    function isRegistered(address agent) external view returns (bool);
-}
+import {IAgentRegistry} from "./interfaces/IAgentRegistry.sol";
+import {CustomRevert} from "./libraries/CustomRevert.sol";
 
 contract DelegationTracker {
+    using CustomRevert for bytes4;
 
-    // Types 
+    // ─── Custom Errors ─────────────────────────────────────
+
+    error TaskAlreadyExists(bytes32 taskId);
+    error DeadlineInPast();
+    error TaskNotOpen();
+    error TaskExpiredError();
+    error NotRegisteredAgent(address agent);
+    error TaskNotAccepted();
+    error FeeExceedsPool(uint256 total, uint256 pool);
+    error NotDelegatedAgent(address agent);
+    error WorkAlreadySubmitted(address agent);
+    error NotExpiredYet();
+    error TaskAlreadyFinalized();
+    error NotDeployer(address caller);
+    error AlreadyInitialized();
+    error NotCaveatEnforcer(address caller);
+    error NotArbiterError(address caller);
+    error NotTaskCreator(address caller);
+
+    // Types
 
     enum TaskStatus { Open, Accepted, Completed, Expired, Disputed }
 
@@ -59,22 +78,22 @@ contract DelegationTracker {
     //  Modifiers 
 
     modifier onlyTaskCreator(bytes32 taskId) {
-        require(msg.sender == tasks[taskId].creator, "Not task creator");
+        if (msg.sender != tasks[taskId].creator) NotTaskCreator.selector.revertWith(msg.sender);
         _;
     }
 
     modifier onlyCaveatEnforcer() {
-        require(msg.sender == capabilityEnforcer, "Not caveat enforcer");
+        if (msg.sender != capabilityEnforcer) NotCaveatEnforcer.selector.revertWith(msg.sender);
         _;
     }
 
     modifier onlyDelegatedAgent(bytes32 taskId) {
-        require(isDelegated[taskId][msg.sender], "Not a delegated agent for this task");
+        if (!isDelegated[taskId][msg.sender]) NotDelegatedAgent.selector.revertWith(msg.sender);
         _;
     }
 
     modifier onlyArbiter() {
-        require(msg.sender == arbiter, "Not arbiter");
+        if (msg.sender != arbiter) NotArbiterError.selector.revertWith(msg.sender);
         _;
     }
 
@@ -90,8 +109,8 @@ contract DelegationTracker {
     /// @notice One-time initialization. Solves chicken-and-egg: deploy Tracker first,
     ///         then deploy Enforcer + Arbiter, then call initialize() with their addresses.
     function initialize(address _capabilityEnforcer, address _arbiter, address _agentRegistry) external {
-        require(msg.sender == deployer, "Not deployer");
-        require(!initialized, "Already initialized");
+        if (msg.sender != deployer) NotDeployer.selector.revertWith(msg.sender);
+        if (initialized) AlreadyInitialized.selector.revertWith();
         capabilityEnforcer = _capabilityEnforcer;
         arbiter = _arbiter;
         agentRegistry = _agentRegistry;
@@ -105,8 +124,8 @@ contract DelegationTracker {
     /// @param deadline Unix timestamp when escrow expires
     /// @param feePool Total USDC budget for sub-agent fees (deducted from orchestrator's stake on settlement)
     function registerTask(bytes32 taskId, uint256 deadline, uint256 feePool) external {
-        require(tasks[taskId].creator == address(0), "Task already exists");
-        require(deadline > block.timestamp, "Deadline in past");
+        if (tasks[taskId].creator != address(0)) revert TaskAlreadyExists(taskId);
+        if (deadline <= block.timestamp) DeadlineInPast.selector.revertWith();
 
         tasks[taskId] = Task({
             creator: msg.sender,
@@ -125,12 +144,11 @@ contract DelegationTracker {
     ///         Agent must be registered, active, and staked >= task budget.
     /// @param taskId The task to claim
     function claimTask(bytes32 taskId) external {
-        require(tasks[taskId].status == TaskStatus.Open, "Task not open");
-        require(block.timestamp < tasks[taskId].deadline, "Task expired");
-        require(
-            IAgentRegistry(agentRegistry).isRegistered(msg.sender),
-            "Not a registered agent"
-        );
+        if (tasks[taskId].status != TaskStatus.Open) TaskNotOpen.selector.revertWith();
+        if (block.timestamp >= tasks[taskId].deadline) TaskExpiredError.selector.revertWith();
+        if (!IAgentRegistry(agentRegistry).isRegistered(msg.sender)) {
+            NotRegisteredAgent.selector.revertWith(msg.sender);
+        }
 
         tasks[taskId].orchestrator = msg.sender;
         tasks[taskId].status = TaskStatus.Accepted;
@@ -150,14 +168,14 @@ contract DelegationTracker {
         bytes32 delegationHash,
         uint256 fee
     ) external onlyCaveatEnforcer {
-        require(tasks[taskId].status == TaskStatus.Accepted, "Task not accepted");
-        require(block.timestamp < tasks[taskId].deadline, "Task expired");
+        if (tasks[taskId].status != TaskStatus.Accepted) TaskNotAccepted.selector.revertWith();
+        if (block.timestamp >= tasks[taskId].deadline) TaskExpiredError.selector.revertWith();
 
         // Ensure total promised fees don't exceed the task's fee pool
-        require(
-            totalPromisedFees[taskId] + fee <= tasks[taskId].feePool,
-            "Fee exceeds pool"
-        );
+        uint256 newTotal = totalPromisedFees[taskId] + fee;
+        if (newTotal > tasks[taskId].feePool) {
+            FeeExceedsPool.selector.revertWith(newTotal, tasks[taskId].feePool);
+        }
 
         taskDelegations[taskId].push(DelegationHop({
             delegator: from,
@@ -185,9 +203,9 @@ contract DelegationTracker {
         bytes32 resultHash,
         string calldata summary
     ) external onlyDelegatedAgent(taskId) {
-        require(tasks[taskId].status == TaskStatus.Accepted, "Task not accepted");
-        require(block.timestamp < tasks[taskId].deadline, "Task expired");
-        require(workRecords[taskId][msg.sender].timestamp == 0, "Already submitted");
+        if (tasks[taskId].status != TaskStatus.Accepted) TaskNotAccepted.selector.revertWith();
+        if (block.timestamp >= tasks[taskId].deadline) TaskExpiredError.selector.revertWith();
+        if (workRecords[taskId][msg.sender].timestamp != 0) WorkAlreadySubmitted.selector.revertWith(msg.sender);
 
         workRecords[taskId][msg.sender] = WorkRecord({
             resultHash: resultHash,
@@ -202,19 +220,17 @@ contract DelegationTracker {
 
     /// @notice Mark task as completed. Called after arbiter approves escrow release.
     function settleTask(bytes32 taskId) external onlyArbiter {
-        require(tasks[taskId].status == TaskStatus.Accepted, "Task not accepted");
+        if (tasks[taskId].status != TaskStatus.Accepted) TaskNotAccepted.selector.revertWith();
         tasks[taskId].status = TaskStatus.Completed;
         emit TaskSettled(taskId);
     }
 
     /// @notice Mark task as expired. Callable by anyone after deadline.
     function expireTask(bytes32 taskId) external {
-        require(block.timestamp >= tasks[taskId].deadline, "Not expired yet");
-        require(
-            tasks[taskId].status == TaskStatus.Open ||
-            tasks[taskId].status == TaskStatus.Accepted,
-            "Task already finalized"
-        );
+        if (block.timestamp < tasks[taskId].deadline) NotExpiredYet.selector.revertWith();
+        if (tasks[taskId].status != TaskStatus.Open && tasks[taskId].status != TaskStatus.Accepted) {
+            TaskAlreadyFinalized.selector.revertWith();
+        }
         tasks[taskId].status = TaskStatus.Expired;
         emit TaskExpired(taskId);
     }
