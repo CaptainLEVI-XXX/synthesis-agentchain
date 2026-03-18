@@ -57,7 +57,7 @@ contract DelegationTrackerTest is Test {
 
     function _createTask() internal returns (bytes32) {
         vm.prank(user);
-        tracker.registerTask(TASK_ID, block.timestamp + 1 days, 500e6);
+        tracker.registerTask(TASK_ID, block.timestamp + 1 days, 500e6, "Test task intent");
         return TASK_ID;
     }
 
@@ -82,13 +82,13 @@ contract DelegationTrackerTest is Test {
         _createTask();
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(DelegationTracker.TaskAlreadyExists.selector, TASK_ID));
-        tracker.registerTask(TASK_ID, block.timestamp + 1 days, 500e6);
+        tracker.registerTask(TASK_ID, block.timestamp + 1 days, 500e6, "Test task intent");
     }
 
     function test_registerTask_pastDeadlineFails() public {
         vm.prank(user);
         vm.expectRevert(DelegationTracker.DeadlineInPast.selector);
-        tracker.registerTask(TASK_ID, block.timestamp - 1, 500e6);
+        tracker.registerTask(TASK_ID, block.timestamp - 1, 500e6, "Test task intent");
     }
 
     function test_registerTask_withFeePool() public {

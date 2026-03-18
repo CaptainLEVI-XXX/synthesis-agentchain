@@ -161,7 +161,7 @@ contract IntegrationTest is Test {
     function test_fullTaskLifecycle() public {
         // ─── Step 1: User creates a task ─────────────────
         vm.prank(user);
-        tracker.registerTask(TASK_ID, block.timestamp + 1 days, 200e6);
+        tracker.registerTask(TASK_ID, block.timestamp + 1 days, 200e6, "Integration test task");
 
         DelegationTracker.Task memory t = tracker.getTask(TASK_ID);
         assertEq(t.creator, user);
@@ -242,7 +242,7 @@ contract IntegrationTest is Test {
         bytes32 taskId = keccak256("partial-task");
 
         vm.prank(user);
-        tracker.registerTask(taskId, block.timestamp + 1 days, 200e6);
+        tracker.registerTask(taskId, block.timestamp + 1 days, 200e6, "Integration test task");
 
         vm.prank(orchestrator);
         tracker.claimTask(taskId);
@@ -290,7 +290,7 @@ contract IntegrationTest is Test {
         bytes32 taskId = keccak256("revoked-task");
 
         vm.prank(user);
-        tracker.registerTask(taskId, block.timestamp + 1 days, 200e6);
+        tracker.registerTask(taskId, block.timestamp + 1 days, 200e6, "Integration test task");
 
         vm.prank(orchestrator);
         tracker.claimTask(taskId);
@@ -336,7 +336,7 @@ contract IntegrationTest is Test {
         bytes32 taskId = keccak256("fee-task");
 
         vm.prank(user);
-        tracker.registerTask(taskId, block.timestamp + 1 days, 200e6);
+        tracker.registerTask(taskId, block.timestamp + 1 days, 200e6, "Integration test task");
 
         vm.prank(orchestrator);
         tracker.claimTask(taskId);
@@ -375,7 +375,7 @@ contract IntegrationTest is Test {
         bytes32 taskId = keccak256("dispute-task");
 
         vm.prank(user);
-        tracker.registerTask(taskId, block.timestamp + 1 days, 200e6);
+        tracker.registerTask(taskId, block.timestamp + 1 days, 200e6, "Integration test task");
 
         vm.prank(orchestrator);
         tracker.claimTask(taskId);
@@ -394,7 +394,7 @@ contract IntegrationTest is Test {
         bytes32 taskId = keccak256("expiry-task");
 
         vm.prank(user);
-        tracker.registerTask(taskId, block.timestamp + 1 days, 200e6);
+        tracker.registerTask(taskId, block.timestamp + 1 days, 200e6, "Integration test task");
 
         vm.warp(block.timestamp + 2 days);
         tracker.expireTask(taskId);

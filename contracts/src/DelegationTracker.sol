@@ -65,10 +65,11 @@ contract DelegationTracker {
     mapping(bytes32 => mapping(address => bool)) public isDelegated;    // quick lookup
     mapping(bytes32 => mapping(address => uint256)) public promisedFees; // taskId → agent → fee (USDC)
     mapping(bytes32 => uint256) public totalPromisedFees;                // taskId → sum of all promised fees
+    mapping(bytes32 => bytes32) public intentHashes;                     // taskId → keccak256(intent) for verification
 
     // Events 
 
-    event TaskRegistered(bytes32 indexed taskId, address indexed creator, uint256 deadline);
+    event TaskRegistered(bytes32 indexed taskId, address indexed creator, uint256 deadline, bytes32 intentHash, string intent);
     event TaskAccepted(bytes32 indexed taskId, address indexed orchestrator);
     event DelegationCreated(bytes32 indexed taskId, address indexed from, address indexed to, uint8 depth);
     event WorkCompleted(bytes32 indexed taskId, address indexed agent, bytes32 resultHash);
@@ -119,13 +120,18 @@ contract DelegationTracker {
 
     // Task Lifecycle 
 
-    /// @notice Register a new task. Called by SDK after Alkahest makeStatement().
+    /// @notice Register a new task with an encoded intent.
+    ///         The intent string is hashed and stored on-chain for verification.
+    ///         The full intent is emitted in the event for agents to read.
     /// @param taskId EAS attestation UID from Alkahest escrow
     /// @param deadline Unix timestamp when escrow expires
     /// @param feePool Total USDC budget for sub-agent fees (deducted from orchestrator's stake on settlement)
-    function registerTask(bytes32 taskId, uint256 deadline, uint256 feePool) external {
+    /// @param intent Human-readable intent string (e.g., "Swap 0.1 ETH to USDC on Base")
+    function registerTask(bytes32 taskId, uint256 deadline, uint256 feePool, string calldata intent) external {
         if (tasks[taskId].creator != address(0)) revert TaskAlreadyExists(taskId);
         if (deadline <= block.timestamp) DeadlineInPast.selector.revertWith();
+
+        bytes32 intentHash = keccak256(abi.encodePacked(intent));
 
         tasks[taskId] = Task({
             creator: msg.sender,
@@ -136,7 +142,22 @@ contract DelegationTracker {
             feePool: feePool
         });
 
-        emit TaskRegistered(taskId, msg.sender, deadline);
+        intentHashes[taskId] = intentHash;
+
+        emit TaskRegistered(taskId, msg.sender, deadline, intentHash, intent);
+    }
+
+    /// @notice Verify that a given intent matches the stored hash for a task.
+    /// @param taskId The task to verify
+    /// @param intent The intent string to check
+    /// @return True if the intent matches the stored hash
+    function verifyIntent(bytes32 taskId, string calldata intent) external view returns (bool) {
+        return intentHashes[taskId] == keccak256(abi.encodePacked(intent));
+    }
+
+    /// @notice Get the stored intent hash for a task.
+    function getIntentHash(bytes32 taskId) external view returns (bytes32) {
+        return intentHashes[taskId];
     }
 
     /// @notice Orchestrator claims an open task. First qualified agent wins.
