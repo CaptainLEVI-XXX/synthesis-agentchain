@@ -36,7 +36,7 @@ contract AgentCapabilityEnforcer is CaveatEnforcer {
         uint8 maxDepth;
         uint8 currentDepth;
         uint256 minStake;
-        uint256 fee;
+        uint256 fee;               // USDC fee promised to this sub-agent
         bytes32[] requiredCaps;
     }
 

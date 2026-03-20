@@ -11,23 +11,16 @@ contract AgentRegistry {
     using SafeERC20 for IERC20;
     using CustomRevert for bytes4;
 
-    // ─── Custom Errors ─────────────────────────────────────
-
     error AlreadyRegistered(address agent);
     error NotRegistered(address agent);
     error NoCapabilities();
     error ZeroStake();
     error InsufficientStake(uint256 requested, uint256 available);
-    error NotArbiter(address caller);
-    error FeeExceedsStake(address orchestrator, uint256 totalFees, uint256 stake);
     error NotERC8004Owner(uint256 tokenId, address caller, address owner);
-
-    // ─── State ─────────────────────────────────────────────
 
     IERC20 public immutable stakingToken;        // USDC
     IIdentityRegistry public immutable identity;  // ERC-8004 at 0x8004A169...
-    address public arbiter;                       // AgentChainArbiter — set after deployment
-    address public deployer;                      // for one-time arbiter setup
+    address public deployer;                      // for deployment
 
     struct Agent {
         string name;
@@ -43,7 +36,6 @@ contract AgentRegistry {
     mapping(address => uint256) public stakes;
     mapping(bytes32 => address[]) public capabilityIndex; // cap hash → agent addresses
 
-    // ─── Events ────────────────────────────────────────────
 
     event AgentRegistered(address indexed agent, string name, uint256 stake, uint256 erc8004Id);
     event AgentUpdated(address indexed agent);
@@ -51,10 +43,6 @@ contract AgentRegistry {
     event Staked(address indexed agent, uint256 amount);
     event Unstaked(address indexed agent, uint256 amount);
     event ENSNameLinked(address indexed agent, string ensName);
-    event FeesDistributed(address indexed orchestrator, uint256 totalFees, uint256 agentCount);
-    event ArbiterSet(address indexed arbiter);
-
-    // ─── Constructor ───────────────────────────────────────
 
     constructor(address _stakingToken, address _identity) {
         stakingToken = IERC20(_stakingToken);
@@ -62,15 +50,6 @@ contract AgentRegistry {
         deployer = msg.sender;
     }
 
-    /// @notice One-time arbiter setup. Called after AgentChainArbiter is deployed.
-    function setArbiter(address _arbiter) external {
-        require(msg.sender == deployer, "Not deployer");
-        require(arbiter == address(0), "Arbiter already set");
-        arbiter = _arbiter;
-        emit ArbiterSet(_arbiter);
-    }
-
-    // ─── Modifiers ─────────────────────────────────────────
 
     modifier nonReentrant() {
         if (Lock.isLocked()) Lock.ContractLocked.selector.revertWith();
@@ -84,12 +63,6 @@ contract AgentRegistry {
         _;
     }
 
-    modifier onlyArbiter() {
-        if (msg.sender != arbiter) NotArbiter.selector.revertWith(msg.sender);
-        _;
-    }
-
-    // ─── Registration ──────────────────────────────────────
 
     /// @notice Register agent + stake in one call. Caller must approve stakingToken first.
     ///         Agent must already own an ERC-8004 identity NFT (register on the Identity Registry first).
@@ -162,10 +135,9 @@ contract AgentRegistry {
 
     function _stake(uint256 amount) internal {
         stakingToken.safeTransferFrom(msg.sender, address(this), amount);
-        stakes[msg.sender] = amount;
+        stakes[msg.sender] += amount;  // fix H3: accumulate, don't overwrite
     }
 
-    // ─── ENS ────────────────────────────────
 
     /// @notice Link an ENS name to this agent for display purposes.
     /// @dev — SDK resolves via ENS contracts directly.
@@ -175,8 +147,6 @@ contract AgentRegistry {
         agents[msg.sender].ensName = ensName;
         emit ENSNameLinked(msg.sender, ensName);
     }
-
-    // ─── Staking ───────────────────────────────────────────
 
     /// @notice Add more stake. Increases max task budget agent can accept.
     function addStake(uint256 amount) external onlyRegistered nonReentrant {
@@ -194,48 +164,6 @@ contract AgentRegistry {
         stakingToken.safeTransfer(msg.sender, amount);
         emit Unstaked(msg.sender, amount);
     }
-
-    // ─── Fee Distribution (Trustless) ───────────────────────
-
-    /// @notice Distribute promised fees from orchestrator's stake to sub-agents.
-    ///         Called by AgentChainArbiter during settleAndRate().
-    ///         This is the core trustless mechanism: fees are encoded in each delegation's
-    ///         AgentTerms (immutable), recorded in DelegationTracker.promisedFees,
-    ///         and auto-distributed here from the orchestrator's staked USDC.
-    /// @param orchestrator The orchestrator whose stake pays the fees
-    /// @param agents_ Array of sub-agent addresses to pay
-    /// @param fees Array of fee amounts (USDC) — must match agents_ length
-    function distributeFeesFromStake(
-        address orchestrator,
-        address[] calldata agents_,
-        uint256[] calldata fees
-    ) external onlyArbiter nonReentrant {
-        require(agents_.length == fees.length, "Length mismatch");
-
-        uint256 totalFees = 0;
-        for (uint i = 0; i < fees.length; i++) {
-            totalFees += fees[i];
-        }
-
-        // Orchestrator must have enough stake to cover all fees
-        if (totalFees > stakes[orchestrator]) {
-            revert FeeExceedsStake(orchestrator, totalFees, stakes[orchestrator]);
-        }
-
-        // Deduct total from orchestrator's stake
-        stakes[orchestrator] -= totalFees;
-
-        // Transfer to each sub-agent directly
-        for (uint i = 0; i < agents_.length; i++) {
-            if (fees[i] > 0) {
-                stakingToken.safeTransfer(agents_[i], fees[i]);
-            }
-        }
-
-        emit FeesDistributed(orchestrator, totalFees, agents_.length);
-    }
-
-    // ─── Updates ───────────────────────────────────────────
 
     /// @notice Update agent capabilities.
     /// @dev O(n*m) loops are fine — agents have 3-10 capabilities.
@@ -263,13 +191,17 @@ contract AgentRegistry {
         emit AgentUpdated(msg.sender);
     }
 
-    /// @notice Deactivate agent (keeps stake, removes from discovery)
+    /// @notice Deactivate agent (keeps stake, removes from discovery and capability index)
     function deactivate() external onlyRegistered {
+        bytes32[] storage caps = agents[msg.sender].capabilities;
+        for (uint i = 0; i < caps.length; i++) {
+            _removeFromIndex(caps[i], msg.sender);
+        }
+
         agents[msg.sender].active = false;
         emit AgentDeactivated(msg.sender);
     }
 
-    // ─── Discovery (View) ──────────────────────────────────
 
     /// @notice Find agents by capability. Off-chain indexer handles reputation filtering.
     function getAgentsByCapability(bytes32 capability) external view returns (address[] memory) {
@@ -300,8 +232,6 @@ contract AgentRegistry {
         }
         return true;
     }
-
-    // ─── Internal ──────────────────────────────────────────
 
     function _removeFromIndex(bytes32 capability, address agent) internal {
         address[] storage list = capabilityIndex[capability];

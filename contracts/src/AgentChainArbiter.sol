@@ -11,12 +11,10 @@ import {CustomRevert} from "./libraries/CustomRevert.sol";
 
 /// @title AgentChainArbiter
 /// @notice Alkahest arbiter with three novel verification mechanisms:
-///         1. Delegation chain integrity — verifies MetaMask delegation hashes are live (not revoked)
-///         2. Stake-weighted consensus — weights completion by agent stake, not headcount
-///         3. Reputation-gated release — ERC-8004 reputation as a verification condition
-/// @dev Extends the Alkahest escrow protocol with a new multi-agent trust model:
-///      escrow releases ONLY when the delegation chain is intact, stake-weighted work
-///      completion exceeds a threshold, and all agents meet minimum reputation.
+///         1. Delegation chain integrity — verifies MetaMask delegation hashes are live
+///         2. Stake-weighted consensus — weights completion by agent stake
+///         3. Reputation-gated release — ERC-8004 reputation as a condition
+/// @dev Implements Alkahest IArbiter. Called by Alkahest during collectEscrowRaw().
 contract AgentChainArbiter is IArbiter {
     using CustomRevert for bytes4;
 
@@ -25,24 +23,22 @@ contract AgentChainArbiter is IArbiter {
     error NotTaskCreator(address caller, address creator);
     error TaskNotAccepted(bytes32 taskId);
     error InvalidRating(int128 value);
-    error InvalidThreshold(uint256 value);
+    error TaskNotSettleable(bytes32 taskId);
 
     // ─── State ─────────────────────────────────────────────
 
     IDelegationTracker public immutable tracker;
-    IDelegationManager public immutable delegationManager; // MetaMask DelegationManager
-    IReputationRegistry public immutable reputation;       // ERC-8004 Reputation Registry
+    IDelegationManager public immutable delegationManager;
+    IReputationRegistry public immutable reputation;
     IAgentRegistry public immutable agentRegistry;
 
-    /// @notice Encoded in the escrow's demand field when creating the Alkahest obligation.
-    ///         This is the NEW verification primitive — multi-dimensional conditions that
-    ///         no existing Alkahest arbiter can express.
+    /// @notice Encoded in Alkahest escrow's demand field. Contains ONLY verification params.
+    ///         taskId and orchestrator are derived from the obligation UID (= escrow UID = taskId)
+    ///         and tracker state, NOT from demand data (fixes C1 audit issue).
     struct DemandData {
-        bytes32 taskId;                // EAS attestation UID = task identifier
-        address orchestrator;          // who receives the full escrowed amount
-        uint256 stakeThresholdBps;     // stake-weighted completion threshold (basis points, e.g., 7500 = 75%)
-        int128 minReputation;          // minimum ERC-8004 reputation score (fixed-point, 1 decimal)
-        bool reputationRequired;       // whether to enforce reputation gate (false for new agents)
+        uint256 stakeThresholdBps;     // e.g., 7500 = 75%
+        int128 minReputation;
+        bool reputationRequired;
     }
 
     // ─── Events ────────────────────────────────────────────
@@ -50,8 +46,8 @@ contract AgentChainArbiter is IArbiter {
     event TaskVerified(
         bytes32 indexed taskId,
         uint256 workRecordCount,
-        uint256 stakeWeightedScore,    // actual stake-weighted completion (bps)
-        bool allDelegationsIntact      // whether chain integrity passed
+        uint256 stakeWeightedScore,
+        bool allDelegationsIntact
     );
     event ReputationSubmitted(bytes32 indexed taskId, uint256 agentCount, int128 rating);
 
@@ -70,36 +66,32 @@ contract AgentChainArbiter is IArbiter {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  VERIFICATION PRIMITIVE: checkStatement()
-    //  Three novel mechanisms that compose into a single
-    //  multi-dimensional verification condition.
+    //  ALKAHEST ARBITER: checkObligation()
+    //  Called by Alkahest escrow during collectEscrowRaw().
     // ═══════════════════════════════════════════════════════
 
     /// @notice Called by Alkahest to verify if escrow should be released.
-    ///         Implements three verification layers:
-    ///         1. Delegation chain integrity (are all MetaMask delegations still live?)
-    ///         2. Stake-weighted consensus (is enough staked value backing completed work?)
-    ///         3. Reputation gate (do all agents meet minimum ERC-8004 reputation?)
-    function checkStatement(
-        Attestation memory,      // obligation (unused — we verify via tracker state)
+    ///         Derives taskId from obligation.uid (= escrow UID).
+    ///         Reads orchestrator from tracker state.
+    function checkObligation(
+        Attestation memory obligation,
         bytes memory demand,
-        bytes32                  // counteroffer (unused)
+        bytes32                  // fulfilling (unused)
     ) external view override returns (bool) {
         DemandData memory d = abi.decode(demand, (DemandData));
 
-        // 0. Verify the orchestrator matches
-        (, address taskOrchestrator,,,,) = tracker.tasks(d.taskId);
-        if (taskOrchestrator != d.orchestrator) return false;
+        // taskId = escrow UID = obligation attestation UID (fix C1)
+        bytes32 taskId = obligation.uid;
+
+        // Read orchestrator from tracker state (not from demand)
+        (, address taskOrchestrator,,,,,,) = tracker.tasks(taskId);
+        if (taskOrchestrator == address(0)) return false;
 
         // Get all delegation hops for this task
-        DelegationHop[] memory hops = tracker.getTaskDelegations(d.taskId);
+        DelegationHop[] memory hops = tracker.getTaskDelegations(taskId);
         if (hops.length == 0) return false;
 
         // ─── LAYER 1: Delegation Chain Integrity ────────────
-        // Verify every MetaMask delegation in the chain is still active
-        // (not revoked via DelegationManager.disableDelegation()).
-        // This is a NEW verification mechanism — no existing Alkahest arbiter
-        // verifies multi-party delegation chain liveness.
         for (uint256 i = 0; i < hops.length; i++) {
             if (delegationManager.disabledDelegations(hops[i].delegationHash)) {
                 return false;
@@ -107,12 +99,6 @@ contract AgentChainArbiter is IArbiter {
         }
 
         // ─── LAYER 2: Stake-Weighted Consensus ─────────────
-        // Instead of "did N agents submit work?" (trivial counter), we weight
-        // by stake: an agent with 5000 USDC staked completing work contributes
-        // more to the consensus than one with 50 USDC.
-        //
-        // Formula: sum(stake of agents WITH work records) / sum(stake of ALL delegated agents)
-        // Must exceed stakeThresholdBps (e.g., 75% = 7500 bps).
         uint256 totalStake = 0;
         uint256 completedStake = 0;
 
@@ -120,34 +106,25 @@ contract AgentChainArbiter is IArbiter {
             uint256 agentStake = agentRegistry.stakes(hops[i].delegate);
             totalStake += agentStake;
 
-            if (tracker.hasWorkRecord(d.taskId, hops[i].delegate)) {
+            if (tracker.hasWorkRecord(taskId, hops[i].delegate)) {
                 completedStake += agentStake;
             }
         }
 
         if (totalStake == 0) return false;
 
-        // completedStake * 10000 / totalStake >= stakeThresholdBps
         if ((completedStake * 10_000) / totalStake < d.stakeThresholdBps) {
             return false;
         }
 
         // ─── LAYER 3: Reputation-Gated Release ─────────────
-        // ERC-8004 reputation is a VERIFICATION CONDITION, not a side effect.
-        // Escrow only releases if every agent in the chain meets minimum
-        // reputation on the canonical ERC-8004 Reputation Registry.
-        //
-        // When reputationRequired is false (for bootstrapping), this layer is skipped.
         if (d.reputationRequired) {
             for (uint256 i = 0; i < hops.length; i++) {
                 (,, uint256 erc8004Id,,,) = agentRegistry.agents(hops[i].delegate);
 
                 address[] memory clients = reputation.getClients(erc8004Id);
-
-                // Skip agents with no reviews (new agents are allowed through)
                 if (clients.length == 0) continue;
 
-                // Get AgentChain-specific reputation summary
                 (uint64 count, int128 avgRating,) = reputation.getSummary(
                     erc8004Id,
                     clients,
@@ -164,36 +141,20 @@ contract AgentChainArbiter is IArbiter {
         return true;
     }
 
-    // ═══════════════════════════════════════════════════════
-    //  SETTLEMENT + REPUTATION FEEDBACK
-    // ═══════════════════════════════════════════════════════
-
-    /// @notice Called by task creator after escrow release.
-    ///         1. Submits ERC-8004 reputation feedback for all agents with work records
-    ///         2. Auto-distributes promised fees from orchestrator's stake to sub-agents
-    ///         3. Marks task as completed
-    /// @param taskId The settled task
-    /// @param rating Rating for agents (1-5 scale, 1 decimal: 10 = 1.0, 45 = 4.5, 50 = 5.0)
+    /// @notice Called by task creator to submit reputation and trigger settlement.
     function settleAndRate(bytes32 taskId, int128 rating) external {
-        // Verify caller is the task creator
-        (address creator, address orchestrator,,,,) = tracker.tasks(taskId);
+        (address creator, address orchestrator,,,,,,) = tracker.tasks(taskId);
         if (msg.sender != creator) {
             revert NotTaskCreator(msg.sender, creator);
         }
 
-        // Validate rating range (1.0 - 5.0 with 1 decimal)
         if (rating < 10 || rating > 50) InvalidRating.selector.revertWith();
 
-        // Get all delegation hops
         DelegationHop[] memory hops = tracker.getTaskDelegations(taskId);
 
-        // ─── Phase 1: Reputation feedback + collect fee data ──────
+        // ─── Reputation feedback ─────────────────────────────
         uint256 totalStake = 0;
         uint256 completedStake = 0;
-
-        address[] memory payableAgents = new address[](hops.length);
-        uint256[] memory payableFees = new uint256[](hops.length);
-        uint256 payableCount = 0;
 
         for (uint256 i = 0; i < hops.length; i++) {
             (,, uint256 erc8004Id,,,) = agentRegistry.agents(hops[i].delegate);
@@ -203,7 +164,6 @@ contract AgentChainArbiter is IArbiter {
             if (tracker.hasWorkRecord(taskId, hops[i].delegate)) {
                 completedStake += agentStake;
 
-                // Submit POSITIVE feedback to ERC-8004 Reputation Registry
                 reputation.giveFeedback(
                     erc8004Id,
                     rating,
@@ -214,30 +174,10 @@ contract AgentChainArbiter is IArbiter {
                     "",
                     bytes32(0)
                 );
-
-                // Collect fee for distribution
-                uint256 fee = tracker.getPromisedFee(taskId, hops[i].delegate);
-                if (fee > 0) {
-                    payableAgents[payableCount] = hops[i].delegate;
-                    payableFees[payableCount] = fee;
-                    payableCount++;
-                }
             }
         }
 
-        // ─── Phase 2: Trustless fee distribution from orchestrator's stake ──
-        if (payableCount > 0) {
-            address[] memory trimmedAgents = new address[](payableCount);
-            uint256[] memory trimmedFees = new uint256[](payableCount);
-            for (uint256 i = 0; i < payableCount; i++) {
-                trimmedAgents[i] = payableAgents[i];
-                trimmedFees[i] = payableFees[i];
-            }
-
-            agentRegistry.distributeFeesFromStake(orchestrator, trimmedAgents, trimmedFees);
-        }
-
-        // ─── Phase 3: Finalize ──────────────────────────────────
+        // ─── Settle: collect from Alkahest + distribute ──────
         tracker.settleTask(taskId);
 
         uint256 stakeScore = totalStake > 0 ? (completedStake * 10_000) / totalStake : 0;
@@ -245,18 +185,19 @@ contract AgentChainArbiter is IArbiter {
         emit ReputationSubmitted(taskId, hops.length, rating);
     }
 
-    /// @notice Submit negative feedback / dispute for a specific agent.
-    ///         Only callable by task creator.
+    /// @notice Submit negative feedback. Only for Accepted or Completed tasks (fix L6).
     function disputeAgent(
         bytes32 taskId,
         address agentAddress,
         string calldata feedbackURI,
         bytes32 feedbackHash
     ) external {
-        (address creator,,,,,) = tracker.tasks(taskId);
+        (address creator,, uint8 status,,,,,) = tracker.tasks(taskId);
         if (msg.sender != creator) {
             revert NotTaskCreator(msg.sender, creator);
         }
+        // Only allow disputes for active or completed tasks (fix L6)
+        if (status == 0 || status == 3) revert TaskNotSettleable(taskId); // Open=0, Expired=3
 
         (,, uint256 erc8004Id,,,) = agentRegistry.agents(agentAddress);
 

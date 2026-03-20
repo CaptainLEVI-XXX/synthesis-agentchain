@@ -14,7 +14,9 @@ contract MockDelegationTrackerArbiter {
         uint8 status;
         uint256 deadline;
         uint256 delegationCount;
-        uint256 feePool;
+        uint256 deposit;
+        bool hasEscrow;
+        string intent;
     }
 
     mapping(bytes32 => Task) public tasks;
@@ -23,8 +25,8 @@ contract MockDelegationTrackerArbiter {
     mapping(bytes32 => mapping(address => uint256)) public _promisedFees;
     bool public settled;
 
-    function setTask(bytes32 taskId, address creator, address orchestrator, uint8 status, uint256 deadline, uint256 delegationCount, uint256 feePool) external {
-        tasks[taskId] = Task(creator, orchestrator, status, deadline, delegationCount, feePool);
+    function setTask(bytes32 taskId, address creator, address orchestrator, uint8 status, uint256 deadline, uint256 delegationCount) external {
+        tasks[taskId] = Task(creator, orchestrator, status, deadline, delegationCount, 0, false, "");
     }
 
     function addDelegation(bytes32 taskId, address delegator, address delegate, uint8 depth, bytes32 delegationHash) external {
@@ -35,9 +37,7 @@ contract MockDelegationTrackerArbiter {
         _hasWork[taskId][agent] = hasWork;
     }
 
-    function setPromisedFee(bytes32 taskId, address agent, uint256 fee) external {
-        _promisedFees[taskId][agent] = fee;
-    }
+    // setPromisedFee removed — fees handled via x402
 
     function getTaskDelegations(bytes32 taskId) external view returns (DelegationHop[] memory) {
         return _delegations[taskId];
@@ -47,9 +47,7 @@ contract MockDelegationTrackerArbiter {
         return _hasWork[taskId][agent];
     }
 
-    function getPromisedFee(bytes32 taskId, address agent) external view returns (uint256) {
-        return _promisedFees[taskId][agent];
-    }
+    // getPromisedFee removed — fees handled via x402
 
     function settleTask(bytes32) external {
         settled = true;
@@ -221,7 +219,7 @@ contract AgentChainArbiterTest is Test {
         );
 
         // Set up task: user created, orchestrator accepted (status=1)
-        tracker.setTask(TASK_ID, user, orchestrator, 1, block.timestamp + 1 days, 2, 500e6);
+        tracker.setTask(TASK_ID, user, orchestrator, 1, block.timestamp + 1 days, 2);
 
         // Register agents with stakes and erc8004 IDs
         registry.setAgent(agent1, 101, 5000e6);
@@ -235,9 +233,9 @@ contract AgentChainArbiterTest is Test {
 
     // ─── Helpers ─────────────────────────────────────────
 
-    function _emptyAttestation() internal pure returns (Attestation memory) {
+    function _attestationWithTaskId(bytes32 taskId) internal pure returns (Attestation memory) {
         return Attestation({
-            uid: bytes32(0),
+            uid: taskId,      // Arbiter reads obligation.uid as the taskId
             schema: bytes32(0),
             time: 0,
             expirationTime: 0,
@@ -251,15 +249,11 @@ contract AgentChainArbiterTest is Test {
     }
 
     function _encodeDemand(
-        bytes32 taskId,
-        address orch,
         uint256 thresholdBps,
         int128 minRep,
         bool repRequired
     ) internal pure returns (bytes memory) {
         return abi.encode(AgentChainArbiter.DemandData({
-            taskId: taskId,
-            orchestrator: orch,
             stakeThresholdBps: thresholdBps,
             minReputation: minRep,
             reputationRequired: repRequired
@@ -267,84 +261,85 @@ contract AgentChainArbiterTest is Test {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  checkStatement Tests
+    //  checkObligation Tests
     // ═══════════════════════════════════════════════════════
 
     // ─── Layer 0: Orchestrator Mismatch ──────────────────
 
-    function test_checkStatement_wrongOrchestratorFails() public {
-        address wrong = makeAddr("wrong");
-        bytes memory demand = _encodeDemand(TASK_ID, wrong, 7500, 0, false);
-        assertFalse(arbiter.checkStatement(_emptyAttestation(), demand, bytes32(0)));
+    function test_checkObligation_noOrchestratorFails() public view {
+        // Task with no orchestrator (not claimed) → orchestrator == address(0) → fails
+        bytes32 unclaimedTask = keccak256("unclaimed");
+        bytes memory demand = _encodeDemand(7500, 0, false);
+        assertFalse(arbiter.checkObligation(_attestationWithTaskId(unclaimedTask), demand, bytes32(0)));
     }
 
     // ─── Layer 1: Delegation Chain Integrity ─────────────
 
-    function test_checkStatement_allDelegationsIntact() public {
+    function test_checkObligation_allDelegationsIntact() public {
         tracker.setWorkRecord(TASK_ID, agent1, true);
         tracker.setWorkRecord(TASK_ID, agent2, true);
 
-        bytes memory demand = _encodeDemand(TASK_ID, orchestrator, 7500, 0, false);
-        assertTrue(arbiter.checkStatement(_emptyAttestation(), demand, bytes32(0)));
+        bytes memory demand = _encodeDemand(7500, 0, false);
+        assertTrue(arbiter.checkObligation(_attestationWithTaskId(TASK_ID), demand, bytes32(0)));
     }
 
-    function test_checkStatement_revokedDelegationFails() public {
+    function test_checkObligation_revokedDelegationFails() public {
         tracker.setWorkRecord(TASK_ID, agent1, true);
         tracker.setWorkRecord(TASK_ID, agent2, true);
         delegationMgr.setDisabled(DEL_HASH_1, true); // revoke agent1's delegation
 
-        bytes memory demand = _encodeDemand(TASK_ID, orchestrator, 5000, 0, false);
-        assertFalse(arbiter.checkStatement(_emptyAttestation(), demand, bytes32(0)));
+        bytes memory demand = _encodeDemand(5000, 0, false);
+        assertFalse(arbiter.checkObligation(_attestationWithTaskId(TASK_ID), demand, bytes32(0)));
     }
 
-    function test_checkStatement_noDelegationsFails() public view {
+    function test_checkObligation_noDelegationsFails() public view {
         bytes32 emptyTaskId = keccak256("empty-task");
         // No delegations added for this task
-        bytes memory demand = _encodeDemand(emptyTaskId, orchestrator, 5000, 0, false);
-        assertFalse(arbiter.checkStatement(_emptyAttestation(), demand, bytes32(0)));
+        bytes memory demand = _encodeDemand(5000, 0, false);
+        assertFalse(arbiter.checkObligation(_attestationWithTaskId(emptyTaskId), demand, bytes32(0)));
     }
 
     // ─── Layer 2: Stake-Weighted Consensus ───────────────
 
-    function test_checkStatement_stakeWeightedPass() public {
+    function test_checkObligation_stakeWeightedPass() public {
         // agent1: 5000 USDC, agent2: 3000 USDC
         // Only agent1 submits work → 5000/8000 = 62.5% = 6250 bps
         tracker.setWorkRecord(TASK_ID, agent1, true);
 
-        bytes memory demand = _encodeDemand(TASK_ID, orchestrator, 6000, 0, false);
-        assertTrue(arbiter.checkStatement(_emptyAttestation(), demand, bytes32(0)));
+        bytes memory demand = _encodeDemand(6000, 0, false);
+        assertTrue(arbiter.checkObligation(_attestationWithTaskId(TASK_ID), demand, bytes32(0)));
     }
 
-    function test_checkStatement_stakeWeightedFail() public {
+    function test_checkObligation_stakeWeightedFail() public {
         // agent1: 5000, agent2: 3000. Only agent2 submits → 3000/8000 = 37.5% = 3750 bps
         tracker.setWorkRecord(TASK_ID, agent2, true);
 
-        bytes memory demand = _encodeDemand(TASK_ID, orchestrator, 5000, 0, false); // need 50%
-        assertFalse(arbiter.checkStatement(_emptyAttestation(), demand, bytes32(0)));
+        bytes memory demand = _encodeDemand(5000, 0, false); // need 50%
+        assertFalse(arbiter.checkObligation(_attestationWithTaskId(TASK_ID), demand, bytes32(0)));
     }
 
-    function test_checkStatement_100percentThreshold() public {
+    function test_checkObligation_100percentThreshold() public {
         // Both agents submit work → 100%
         tracker.setWorkRecord(TASK_ID, agent1, true);
         tracker.setWorkRecord(TASK_ID, agent2, true);
 
-        bytes memory demand = _encodeDemand(TASK_ID, orchestrator, 10000, 0, false);
-        assertTrue(arbiter.checkStatement(_emptyAttestation(), demand, bytes32(0)));
+        bytes memory demand = _encodeDemand(10000, 0, false);
+        assertTrue(arbiter.checkObligation(_attestationWithTaskId(TASK_ID), demand, bytes32(0)));
     }
 
-    function test_checkStatement_zeroStakeFails() public {
+    function test_checkObligation_zeroStakeFails() public {
         // Set agents to zero stake
         registry.setAgent(agent1, 101, 0);
         registry.setAgent(agent2, 102, 0);
         tracker.setWorkRecord(TASK_ID, agent1, true);
 
-        bytes memory demand = _encodeDemand(TASK_ID, orchestrator, 5000, 0, false);
-        assertFalse(arbiter.checkStatement(_emptyAttestation(), demand, bytes32(0)));
+        bytes memory demand = _encodeDemand(5000, 0, false);
+        assertFalse(arbiter.checkObligation(_attestationWithTaskId(TASK_ID), demand, bytes32(0)));
     }
 
     // ─── Layer 3: Reputation-Gated Release ───────────────
 
-    function test_checkStatement_reputationGatePass() public {
+    function test_checkObligation_reputationGatePass() public {
         tracker.setWorkRecord(TASK_ID, agent1, true);
         tracker.setWorkRecord(TASK_ID, agent2, true);
 
@@ -354,11 +349,11 @@ contract AgentChainArbiterTest is Test {
         reputation.setReputation(101, clients, 5, 40); // 4.0 stars
         reputation.setReputation(102, clients, 3, 35); // 3.5 stars
 
-        bytes memory demand = _encodeDemand(TASK_ID, orchestrator, 5000, 30, true); // min 3.0
-        assertTrue(arbiter.checkStatement(_emptyAttestation(), demand, bytes32(0)));
+        bytes memory demand = _encodeDemand(5000, 30, true); // min 3.0
+        assertTrue(arbiter.checkObligation(_attestationWithTaskId(TASK_ID), demand, bytes32(0)));
     }
 
-    function test_checkStatement_reputationGateFail() public {
+    function test_checkObligation_reputationGateFail() public {
         tracker.setWorkRecord(TASK_ID, agent1, true);
         tracker.setWorkRecord(TASK_ID, agent2, true);
 
@@ -367,11 +362,11 @@ contract AgentChainArbiterTest is Test {
         reputation.setReputation(101, clients, 5, 40); // 4.0 stars — ok
         reputation.setReputation(102, clients, 3, 20); // 2.0 stars — below min
 
-        bytes memory demand = _encodeDemand(TASK_ID, orchestrator, 5000, 30, true); // min 3.0
-        assertFalse(arbiter.checkStatement(_emptyAttestation(), demand, bytes32(0)));
+        bytes memory demand = _encodeDemand(5000, 30, true); // min 3.0
+        assertFalse(arbiter.checkObligation(_attestationWithTaskId(TASK_ID), demand, bytes32(0)));
     }
 
-    function test_checkStatement_reputationSkippedWhenNotRequired() public {
+    function test_checkObligation_reputationSkippedWhenNotRequired() public {
         tracker.setWorkRecord(TASK_ID, agent1, true);
         tracker.setWorkRecord(TASK_ID, agent2, true);
 
@@ -381,11 +376,11 @@ contract AgentChainArbiterTest is Test {
         reputation.setReputation(101, clients, 5, 10); // 1.0 stars
         reputation.setReputation(102, clients, 3, 10); // 1.0 stars
 
-        bytes memory demand = _encodeDemand(TASK_ID, orchestrator, 5000, 30, false);
-        assertTrue(arbiter.checkStatement(_emptyAttestation(), demand, bytes32(0)));
+        bytes memory demand = _encodeDemand(5000, 30, false);
+        assertTrue(arbiter.checkObligation(_attestationWithTaskId(TASK_ID), demand, bytes32(0)));
     }
 
-    function test_checkStatement_newAgentNoReviewsPassesRepGate() public {
+    function test_checkObligation_newAgentNoReviewsPassesRepGate() public {
         tracker.setWorkRecord(TASK_ID, agent1, true);
         tracker.setWorkRecord(TASK_ID, agent2, true);
 
@@ -395,8 +390,8 @@ contract AgentChainArbiterTest is Test {
         reputation.setReputation(101, clients, 5, 40); // 4.0 stars
         // agent2 (erc8004Id=102) has no clients set → empty array → skipped
 
-        bytes memory demand = _encodeDemand(TASK_ID, orchestrator, 5000, 30, true);
-        assertTrue(arbiter.checkStatement(_emptyAttestation(), demand, bytes32(0)));
+        bytes memory demand = _encodeDemand(5000, 30, true);
+        assertTrue(arbiter.checkObligation(_attestationWithTaskId(TASK_ID), demand, bytes32(0)));
     }
 
     // ═══════════════════════════════════════════════════════
@@ -406,8 +401,7 @@ contract AgentChainArbiterTest is Test {
     function test_settleAndRate_success() public {
         tracker.setWorkRecord(TASK_ID, agent1, true);
         tracker.setWorkRecord(TASK_ID, agent2, true);
-        tracker.setPromisedFee(TASK_ID, agent1, 80e6);
-        tracker.setPromisedFee(TASK_ID, agent2, 50e6);
+        // Fee setup removed — sub-agents paid via x402
 
         vm.prank(user);
         arbiter.settleAndRate(TASK_ID, 45); // 4.5 stars
@@ -416,7 +410,7 @@ contract AgentChainArbiterTest is Test {
         assertTrue(tracker.settled());
 
         // Check fees were distributed
-        assertEq(registry.getDistributionCount(), 1);
+        // Fee distribution removed — sub-agents paid via x402
 
         // Check reputation feedback was submitted
         assertEq(reputation.getFeedbackCount(), 2);
@@ -448,8 +442,7 @@ contract AgentChainArbiterTest is Test {
     function test_settleAndRate_onlyAgentsWithWorkGetPaid() public {
         // Only agent1 submitted work
         tracker.setWorkRecord(TASK_ID, agent1, true);
-        tracker.setPromisedFee(TASK_ID, agent1, 80e6);
-        tracker.setPromisedFee(TASK_ID, agent2, 50e6); // agent2 has fee but no work
+        // Fee setup removed — sub-agents paid via x402 // agent2 has fee but no work
 
         vm.prank(user);
         arbiter.settleAndRate(TASK_ID, 40);
@@ -463,8 +456,7 @@ contract AgentChainArbiterTest is Test {
     function test_settleAndRate_emitsEvents() public {
         tracker.setWorkRecord(TASK_ID, agent1, true);
         tracker.setWorkRecord(TASK_ID, agent2, true);
-        tracker.setPromisedFee(TASK_ID, agent1, 80e6);
-        tracker.setPromisedFee(TASK_ID, agent2, 50e6);
+        // Fee setup removed — sub-agents paid via x402
 
         vm.expectEmit(true, false, false, true);
         emit AgentChainArbiter.TaskVerified(TASK_ID, 2, 10000, true);

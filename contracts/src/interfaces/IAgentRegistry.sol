@@ -13,9 +13,4 @@ interface IAgentRegistry {
         uint256 registeredAt,
         bool active
     );
-    function distributeFeesFromStake(
-        address orchestrator,
-        address[] calldata agents_,
-        uint256[] calldata fees
-    ) external;
 }

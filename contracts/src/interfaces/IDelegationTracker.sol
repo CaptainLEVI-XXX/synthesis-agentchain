@@ -16,6 +16,8 @@ interface IDelegationTracker {
         uint8 status,
         uint256 deadline,
         uint256 delegationCount,
-        uint256 feePool
+        uint256 deposit,
+        bool hasEscrow,
+        string memory intent
     );
 }

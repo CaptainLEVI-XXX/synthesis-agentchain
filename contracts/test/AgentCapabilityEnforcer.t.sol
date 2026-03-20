@@ -229,7 +229,7 @@ contract AgentCapabilityEnforcerTest is Test {
         assertEq(rec.to, subAgent);
         assertEq(rec.depth, 1);
         assertEq(rec.delegationHash, DEL_HASH);
-        assertEq(rec.fee, 80e6);
+        // fee field removed — x402 handles payments
     }
 
     function test_afterHook_emitsEvent() public {
@@ -257,7 +257,7 @@ contract AgentCapabilityEnforcerTest is Test {
         assertEq(tracker.getRecordingCount(), 2);
         MockDelegationTracker.RecordedDelegation memory rec2 = tracker.getRecording(1);
         assertEq(rec2.to, subAgent2);
-        assertEq(rec2.fee, 50e6);
+        // fee field removed — x402 handles payments
     }
 
     // ─── Constructor Tests ────────────────────────────────
