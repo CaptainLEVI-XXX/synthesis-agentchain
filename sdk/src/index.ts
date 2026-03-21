@@ -54,7 +54,7 @@ export class AgentChain {
 export { createAgentChainClient, BASE_ADDRESSES, BASE_SEPOLIA_ADDRESSES } from './client.js';
 export { capToBytes32, RegistryModule } from './core/registry.js';
 export { TrackerModule } from './core/tracker.js';
-export { ArbiterModule } from './core/arbiter.js';
+export { ArbiterModule, encodeDemand } from './core/arbiter.js';
 export { DelegationModule, composeAgentTerms } from './core/delegation.js';
 export { AccountsModule } from './core/accounts.js';
 export { EscrowModule } from './core/escrow.js';

@@ -21,15 +21,18 @@ export enum TaskStatus {
   Accepted = 1,
   Completed = 2,
   Expired = 3,
+  Disputed = 4,
 }
 
 export type Task = {
   creator: Address;
   orchestrator: Address;
-  deadline: bigint;
-  feePool: bigint;
-  delegationCount: bigint;
   status: TaskStatus;
+  deadline: bigint;
+  delegationCount: bigint;
+  deposit: bigint;
+  hasEscrow: boolean;
+  intent: string;
 };
 
 export type DelegationHop = {
@@ -47,11 +50,10 @@ export type WorkRecord = {
   submittedAt: bigint;
 };
 
-// ─── Arbiter / Escrow Types ──────────────────────────────
+// ─── Arbiter Types ──────────────────────────────────────
 
+/** Encoded in Alkahest escrow demand. Only verification params — taskId derived from obligation.uid */
 export type DemandData = {
-  taskId: Hex;
-  orchestrator: Address;
   stakeThresholdBps: bigint;
   minReputation: bigint;
   reputationRequired: boolean;
@@ -108,11 +110,12 @@ export type MechResult = {
 
 // ─── Event Types ─────────────────────────────────────────
 
-export type TaskEvent = {
+export type TaskCreatedEvent = {
   taskId: Hex;
   creator: Address;
+  deposit: bigint;
   deadline: bigint;
-  feePool: bigint;
+  intent: string;
 };
 
 export type TaskAcceptedEvent = {
@@ -126,6 +129,7 @@ export type DelegationEvent = {
   delegate: Address;
   depth: number;
   delegationHash: Hex;
+  fee: bigint;
 };
 
 export type WorkEvent = {
@@ -146,6 +150,8 @@ export type ContractAddresses = {
   reputationRegistry: Address;
   delegationManager: Address;
   simpleFactory: Address;
+  alkahestEscrow: Address;
+  eas: Address;
 };
 
 export type AgentChainConfig = {

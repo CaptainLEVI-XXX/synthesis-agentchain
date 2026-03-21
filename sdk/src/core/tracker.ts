@@ -30,9 +30,40 @@ export class TrackerModule {
     } as any);
   }
 
-  async registerTask(taskId: Hex, deadline: bigint, feePool: bigint) {
-    return this.write('registerTask', [taskId, deadline, feePool]);
+  // ─── Task Creation ─────────────────────────────────────
+
+  /** Entry Point A: Register task for delegation-only flow (no Alkahest).
+   *  If feePool > 0, caller must approve USDC to DelegationTracker first. */
+  async registerTask(params: {
+    taskId: Hex;
+    deadline: bigint;
+    deposit: bigint;
+    feePool: bigint;
+    intent: string;
+  }) {
+    return this.write('registerTask', [
+      params.taskId, params.deadline, params.deposit, params.feePool, params.intent,
+    ]);
   }
+
+  /** Entry Point B: Create task with Alkahest escrow.
+   *  Caller must approve USDC to DelegationTracker first.
+   *  Returns taskId (= Alkahest escrow UID). */
+  async createTask(params: {
+    deadline: bigint;
+    deposit: bigint;
+    stakeThresholdBps: bigint;
+    intent: string;
+  }): Promise<Hex> {
+    const receipt = await this.write('createTask', [
+      params.deadline, params.deposit, params.stakeThresholdBps, params.intent,
+    ]);
+    // taskId is in the return value / event logs
+    const taskId = receipt.logs[0]?.topics?.[1] as Hex;
+    return taskId;
+  }
+
+  // ─── Task Lifecycle ────────────────────────────────────
 
   async claimTask(taskId: Hex) { return this.write('claimTask', [taskId]); }
   async expireTask(taskId: Hex) { return this.write('expireTask', [taskId]); }
@@ -41,19 +72,19 @@ export class TrackerModule {
     return this.write('submitWorkRecord', [taskId, resultHash, summary]);
   }
 
-  async hasWorkRecord(taskId: Hex, agent: Address): Promise<boolean> {
-    return this.read('hasWorkRecord', [taskId, agent]);
-  }
+  // ─── Read Functions ────────────────────────────────────
 
   async getTask(taskId: Hex): Promise<Task> {
     const raw = await this.read('getTask', [taskId]);
     return {
       creator: raw.creator,
       orchestrator: raw.orchestrator,
-      deadline: raw.deadline,
-      feePool: raw.feePool,
-      delegationCount: raw.delegationCount,
       status: Number(raw.status) as TaskStatus,
+      deadline: raw.deadline,
+      delegationCount: raw.delegationCount,
+      deposit: raw.deposit,
+      hasEscrow: raw.hasEscrow,
+      intent: raw.intent,
     };
   }
 
@@ -76,12 +107,8 @@ export class TrackerModule {
     return this.read('isDelegated', [taskId, agent]);
   }
 
-  async getPromisedFee(taskId: Hex, agent: Address): Promise<bigint> {
-    return this.read('getPromisedFee', [taskId, agent]);
-  }
-
-  async getTotalPromisedFees(taskId: Hex): Promise<bigint> {
-    return this.read('getTotalPromisedFees', [taskId]);
+  async hasWorkRecord(taskId: Hex, agent: Address): Promise<boolean> {
+    return this.read('hasWorkRecord', [taskId, agent]);
   }
 
   async getWorkRecord(taskId: Hex, agent: Address): Promise<WorkRecord> {
@@ -92,5 +119,13 @@ export class TrackerModule {
       summary: raw.summary,
       submittedAt: raw.timestamp,
     };
+  }
+
+  async getPromisedFee(taskId: Hex, agent: Address): Promise<bigint> {
+    return this.read('getPromisedFee', [taskId, agent]);
+  }
+
+  async getTotalPromisedFees(taskId: Hex): Promise<bigint> {
+    return this.read('getTotalPromisedFees', [taskId]);
   }
 }

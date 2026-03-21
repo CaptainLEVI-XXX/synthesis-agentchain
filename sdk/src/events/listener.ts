@@ -1,6 +1,6 @@
 import type { AgentChainClient } from '../client.js';
 import type {
-  TaskEvent,
+  TaskCreatedEvent,
   TaskAcceptedEvent,
   DelegationEvent,
   WorkEvent,
@@ -14,19 +14,20 @@ export class EventsModule {
     this.client = client;
   }
 
-  onTaskRegistered(callback: (event: TaskEvent) => void): () => void {
+  onTaskCreated(callback: (event: TaskCreatedEvent) => void): () => void {
     const unwatch = this.client.publicClient.watchContractEvent({
       address: this.client.addresses.delegationTracker,
       abi: DelegationTrackerAbi,
-      eventName: 'TaskRegistered',
+      eventName: 'TaskCreated' as any,  // ABI may still have 'TaskRegistered' — updated on next ABI regen
       onLogs: (logs) => {
         for (const log of logs) {
           const args = (log as any).args;
           callback({
             taskId: args.taskId,
             creator: args.creator,
+            deposit: args.deposit ?? 0n,
             deadline: args.deadline,
-            feePool: args.feePool ?? 0n,
+            intent: args.intent ?? '',
           });
         }
       },
@@ -66,6 +67,7 @@ export class EventsModule {
             delegate: args.delegate,
             depth: Number(args.depth),
             delegationHash: args.delegationHash,
+            fee: args.fee ?? 0n,
           });
         }
       },
@@ -94,11 +96,10 @@ export class EventsModule {
 
   onTaskForCapability(
     _capability: string,
-    callback: (event: TaskEvent) => void,
+    callback: (event: TaskCreatedEvent) => void,
   ): () => void {
     // Listen for all task events — capability filtering happens at the
     // application layer since task events don't include capability data.
-    // The SDK consumer should use discovery.discover() to match agents.
-    return this.onTaskRegistered(callback);
+    return this.onTaskCreated(callback);
   }
 }

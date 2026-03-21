@@ -10,18 +10,16 @@ import { AgentChainArbiterAbi } from '../abis/AgentChainArbiter.js';
 import type { DemandData } from '../types/index.js';
 import type { AgentChainClient } from '../client.js';
 
+/** Encode DemandData for Alkahest escrow demand field.
+ *  Only contains verification params — taskId derived from obligation.uid by Arbiter. */
 export function encodeDemand(demand: DemandData): Hex {
   return encodeAbiParameters(
     [
-      { name: 'taskId', type: 'bytes32' },
-      { name: 'orchestrator', type: 'address' },
       { name: 'stakeThresholdBps', type: 'uint256' },
       { name: 'minReputation', type: 'int128' },
       { name: 'reputationRequired', type: 'bool' },
     ],
     [
-      demand.taskId,
-      demand.orchestrator,
       demand.stakeThresholdBps,
       demand.minReputation,
       demand.reputationRequired,
@@ -62,9 +60,11 @@ export class ArbiterModule {
     ]);
   }
 
-  async checkStatement(demand: DemandData): Promise<boolean> {
-    const emptyAttestation = {
-      uid: zeroHash,
+  /** Call checkObligation — used by Alkahest to verify escrow release.
+   *  taskId is derived from obligation.uid (the escrow attestation UID). */
+  async checkObligation(taskId: Hex, demand: DemandData): Promise<boolean> {
+    const obligation = {
+      uid: taskId,
       schema: zeroHash,
       time: 0n,
       expirationTime: 0n,
@@ -79,8 +79,8 @@ export class ArbiterModule {
     return this.client.publicClient.readContract({
       address: this.addr,
       abi: AgentChainArbiterAbi,
-      functionName: 'checkStatement',
-      args: [emptyAttestation, encodeDemand(demand), zeroHash],
+      functionName: 'checkObligation',
+      args: [obligation, encodeDemand(demand), zeroHash],
     } as any) as Promise<boolean>;
   }
 

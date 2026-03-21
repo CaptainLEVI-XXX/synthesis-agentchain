@@ -1,57 +1,145 @@
 import {
   type Hex,
+  type Address,
   encodeAbiParameters,
   parseAbiParameters,
 } from 'viem';
-import { ERC20Abi } from '../abis/external/ERC20.js';
 import type { AgentChainClient } from '../client.js';
 import type { DemandData } from '../types/index.js';
+import { encodeDemand } from './arbiter.js';
 
-// Re-export to indicate the module is aware of ERC20Abi for future escrow usage
-export { ERC20Abi };
+/** Alkahest ERC20EscrowObligation ABI (minimal for SDK usage) */
+const AlkahestEscrowAbi = [
+  {
+    name: 'doObligation',
+    type: 'function',
+    inputs: [
+      {
+        name: 'data', type: 'tuple',
+        components: [
+          { name: 'arbiter', type: 'address' },
+          { name: 'demand', type: 'bytes' },
+          { name: 'token', type: 'address' },
+          { name: 'amount', type: 'uint256' },
+        ],
+      },
+      { name: 'expirationTime', type: 'uint64' },
+    ],
+    outputs: [{ type: 'bytes32' }],
+    stateMutability: 'nonpayable',
+  },
+  {
+    name: 'doObligationFor',
+    type: 'function',
+    inputs: [
+      {
+        name: 'data', type: 'tuple',
+        components: [
+          { name: 'arbiter', type: 'address' },
+          { name: 'demand', type: 'bytes' },
+          { name: 'token', type: 'address' },
+          { name: 'amount', type: 'uint256' },
+        ],
+      },
+      { name: 'expirationTime', type: 'uint64' },
+      { name: 'recipient', type: 'address' },
+    ],
+    outputs: [{ type: 'bytes32' }],
+    stateMutability: 'nonpayable',
+  },
+  {
+    name: 'collectEscrow',
+    type: 'function',
+    inputs: [
+      { name: 'escrow', type: 'bytes32' },
+      { name: 'fulfillment', type: 'bytes32' },
+    ],
+    outputs: [{ type: 'bool' }],
+    stateMutability: 'nonpayable',
+  },
+  {
+    name: 'reclaimExpired',
+    type: 'function',
+    inputs: [{ name: 'uid', type: 'bytes32' }],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+] as const;
 
 export class EscrowModule {
   constructor(private readonly client: AgentChainClient) {}
 
-  /**
-   * Encodes DemandData into ABI-packed bytes for Alkahest escrow demands.
-   */
+  private get alkahestAddr() {
+    return this.client.addresses.alkahestEscrow;
+  }
+
+  /** Encode DemandData for Alkahest escrow demand field. */
   encodeDemand(demand: DemandData): Hex {
-    return encodeAbiParameters(
-      parseAbiParameters(
-        'bytes32 taskId, address orchestrator, uint256 stakeThresholdBps, int128 minReputation, bool reputationRequired',
-      ),
-      [
-        demand.taskId,
-        demand.orchestrator,
-        demand.stakeThresholdBps,
-        demand.minReputation,
-        demand.reputationRequired,
-      ],
-    );
+    return encodeDemand(demand);
   }
 
-  /**
-   * Creates an Alkahest escrow for a task.
-   * @throws Not yet available — Alkahest escrow is not deployed.
-   */
-  async createEscrow(_params: {
-    taskId: Hex;
+  /** Create Alkahest escrow directly (without going through DelegationTracker).
+   *  Caller must approve USDC to the Alkahest escrow contract first. */
+  async createEscrow(params: {
     amount: bigint;
-    token?: `0x${string}`;
-  }): Promise<never> {
-    throw new Error(
-      'Alkahest escrow not yet deployed. Use tracker.registerTask() directly for testing.',
-    );
+    demand: DemandData;
+    deadline: bigint;
+    recipient?: Address;
+  }): Promise<Hex> {
+    if (!this.client.walletClient) throw new Error('Wallet client required');
+
+    const demandBytes = this.encodeDemand(params.demand);
+    const obligationData = {
+      arbiter: this.client.addresses.agentChainArbiter,
+      demand: demandBytes,
+      token: this.client.addresses.usdc,
+      amount: params.amount,
+    };
+
+    const fnName = params.recipient ? 'doObligationFor' : 'doObligation';
+    const args = params.recipient
+      ? [obligationData, params.deadline, params.recipient]
+      : [obligationData, params.deadline];
+
+    const hash = await this.client.walletClient.writeContract({
+      address: this.alkahestAddr,
+      abi: AlkahestEscrowAbi,
+      functionName: fnName,
+      args,
+    } as any);
+
+    const receipt = await this.client.publicClient.waitForTransactionReceipt({ hash });
+    // The escrow UID is the EAS attestation UID emitted in the logs
+    const escrowUid = receipt.logs[0]?.topics?.[1] as Hex;
+    return escrowUid;
   }
 
-  /**
-   * Collects payment from an Alkahest escrow after task completion.
-   * @throws Not yet available — Alkahest escrow is not deployed.
-   */
-  async collectPayment(_taskId: Hex): Promise<never> {
-    throw new Error(
-      'Alkahest escrow not yet deployed. Use tracker.registerTask() directly for testing.',
-    );
+  /** Collect escrowed funds after fulfillment.
+   *  Alkahest calls our Arbiter.checkObligation() to verify. */
+  async collectEscrow(escrowUid: Hex, fulfillmentUid: Hex) {
+    if (!this.client.walletClient) throw new Error('Wallet client required');
+
+    const hash = await this.client.walletClient.writeContract({
+      address: this.alkahestAddr,
+      abi: AlkahestEscrowAbi,
+      functionName: 'collectEscrow',
+      args: [escrowUid, fulfillmentUid],
+    } as any);
+
+    return this.client.publicClient.waitForTransactionReceipt({ hash });
+  }
+
+  /** Reclaim expired escrow funds. */
+  async reclaimExpired(escrowUid: Hex) {
+    if (!this.client.walletClient) throw new Error('Wallet client required');
+
+    const hash = await this.client.walletClient.writeContract({
+      address: this.alkahestAddr,
+      abi: AlkahestEscrowAbi,
+      functionName: 'reclaimExpired',
+      args: [escrowUid],
+    } as any);
+
+    return this.client.publicClient.waitForTransactionReceipt({ hash });
   }
 }
