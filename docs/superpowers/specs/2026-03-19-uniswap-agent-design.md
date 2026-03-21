@@ -196,6 +196,99 @@ async executeSwapIntent(params: SwapParams): Promise<SwapResult> {
 7. REMOVE   → Exit position, collect accumulated fees
 ```
 
+### Token Preparation Logic
+
+Before adding liquidity, the agent must ensure it holds both pool tokens in the right ratio. Three scenarios:
+
+```
+Scenario 1: User holds Token A, wants LP in A/B pool
+  → Swap 50% of A → B (1 swap)
+  → Add liquidity with A + B
+
+Scenario 2: User holds Token C, wants LP in A/B pool (C is neither A nor B)
+  → Swap 50% of C → A (swap #1)
+  → Swap 50% of C → B (swap #2)
+  → Add liquidity with A + B
+
+Scenario 3: User holds Token A, wants LP in A/B pool, but wrong ratio
+  → Compute exact amounts needed for the tick range
+  → Swap only the excess A → B
+  → Add liquidity with balanced A + B
+```
+
+### Batched Execution via Smart Account
+
+Since UniAgent uses a HybridDeleGator (ERC-4337 smart account), all token preparation and LP operations are **batched into a single atomic transaction**:
+
+```
+Single Tx (batched via smart account):
+  call[0]: Swap ETH → USDC (via Universal Router)
+  call[1]: Swap ETH → USDT (via Universal Router)
+  call[2]: Approve USDC to PositionManager
+  call[3]: Approve USDT to PositionManager
+  call[4]: Add USDC/USDT LP position
+= 1 transaction, 1 TxID, atomic (all succeed or all revert)
+```
+
+**Benefits over sequential transactions:**
+- **Cheaper** — one base gas cost instead of N
+- **Atomic** — no partial state if a step fails mid-way
+- **Simpler** — one TxID captures the entire operation
+- **No nonce management** — single tx, single nonce
+
+```typescript
+async prepareAndAddLiquidity(params: {
+  inputToken: Address,
+  inputAmount: bigint,
+  tokenA: Address,
+  tokenB: Address,
+  tickLower: number,
+  tickUpper: number,
+  feeTier: number,
+  version: 'v3' | 'v4',
+}): Promise<{ txHash: Hex }> {
+  const calls: BatchCall[] = [];
+
+  if (params.inputToken !== params.tokenA && params.inputToken !== params.tokenB) {
+    // Scenario 2: input is NEITHER pool token → batch two swaps
+    const halfAmount = params.inputAmount / 2n;
+    calls.push(
+      buildSwapCall(params.inputToken, params.tokenA, halfAmount),
+      buildSwapCall(params.inputToken, params.tokenB, params.inputAmount - halfAmount),
+    );
+  } else {
+    // Scenario 1: input is one of the pool tokens → batch one swap
+    const otherToken = params.inputToken === params.tokenA ? params.tokenB : params.tokenA;
+    calls.push(
+      buildSwapCall(params.inputToken, otherToken, params.inputAmount / 2n),
+    );
+  }
+
+  // Add approvals + LP mint to the same batch
+  calls.push(
+    buildApproveCall(params.tokenA, positionManager),
+    buildApproveCall(params.tokenB, positionManager),
+    buildAddLiquidityCall(params),
+  );
+
+  // Execute all calls as a single atomic transaction via smart account
+  const txHash = await this.executeBatch(calls);
+  return { txHash };
+}
+
+// Uses HybridDeleGator's batch execution capability
+private async executeBatch(calls: BatchCall[]): Promise<Hex> {
+  const hash = await walletClient.sendTransaction({
+    to: smartAccountAddress,
+    data: encodeBatchExecution(calls),  // ERC-4337 batch encoding
+  });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash });
+  return receipt.transactionHash;
+}
+```
+
+For **simple swaps** (no LP), the agent still uses individual Trading API calls since those go through Uniswap's routing optimization. Batching is used when we need **multiple on-chain operations** that are sequential and dependent (swap → approve → LP).
+
 ### Range Strategies
 
 ```
