@@ -4,10 +4,9 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "declaration": true,
-    "declarationMap": true,
     "sourceMap": true,
     "outDir": "dist",
-    "rootDir": "src",
+    "rootDir": ".",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -15,6 +14,6 @@
     "resolveJsonModule": true,
     "isolatedModules": true
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "test"]
+  "include": ["shared/**/*", "price-agent/**/*", "swap-agent/**/*", "lp-agent/**/*", "hooks-agent/**/*", "setup.ts"],
+  "exclude": ["node_modules", "dist"]
 }
