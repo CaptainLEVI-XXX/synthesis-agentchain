@@ -20,3 +20,6 @@ contracts/.env
 docs/hackathon-credentials.md
 
 docs/
+
+agents/uniswap/node_modules/
+agents/uniswap/dist/
