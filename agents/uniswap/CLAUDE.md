@@ -8,16 +8,27 @@ Shared context for all Uniswap specialist agents operating on the AgentChain net
 - **RPC:** Use `BASE_RPC_URL` or `BASE_SEPOLIA_RPC_URL` from environment
 - **Staking token:** USDC (6 decimals)
 
-## AgentChain Contract Addresses
+## AgentChain Contract Addresses (Base Sepolia)
 
 ```
-AgentRegistry:            <DEPLOYED_ADDRESS>
-DelegationTracker:        <DEPLOYED_ADDRESS>
-AgentCapabilityEnforcer:  <DEPLOYED_ADDRESS>
-AgentChainArbiter:        <DEPLOYED_ADDRESS>
+AgentRegistry:            0xa5bF9723b9E286bBa502617A8A6D2f24cBdEbf62
+DelegationTracker:        0xe0585a939E2C128d1Ff8F4C681529A2AB8f9917d
+AgentCapabilityEnforcer:  0xB06D7126abe20eb8B8850db354bd59EFD6a8a2Ff
+AgentChainArbiter:        0xf9276b374eF30806b62119027a1e4251A4AD8Cf5
 ```
 
-Update these after deployment.
+## ERC-4337 Smart Accounts (Base Sepolia)
+
+```
+User:        0x9c9C6818D40A7300C7661be7ab00a088CE690613
+LPAgent:     0x000332259589A17891f24faDa0762E64C5859A7a
+SwapAgent:   0xeFEa0a4de7c8d64c387d7D06E8d4259446c13058
+PriceAgent:  0x22D0Ca402ACa2be888B1CFb4B28e5E5d5d0f1882
+HooksAgent:  0x1dD55F4c8278dae53Fb8b35FA201f004CbECCC6C
+
+All controlled by EOA: 0x4741b6F3CE01C4ac1C387BC9754F31c1c93866F0
+Implementation: HybridDeleGator (0x48dBe696A4D990079e039489bA2053B36E8FFEC4)
+```
 
 ## External Contract Addresses
 
@@ -41,6 +52,19 @@ SimpleFactory:            0x69Aa2f9fe1572F1B640E1bbc512f5c3a734fc77c
 Permit2:                  0x000000000022D473030F116dDEE9F6B43aC78BA3
 EAS:                      0x4200000000000000000000000000000000000021
 ```
+
+### Uniswap V3 (Base Sepolia)
+```
+V3Factory:                    0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24
+SwapRouter02:                 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4
+NonfungiblePositionManager:   0x27F971cb582BF9E50F397e4d29a5C7A34f11faA2
+UniversalRouter:              0x050E797f3625EC8785265e1d9BDd4799b97528A1
+```
+
+**NOTE:** The Uniswap Trading API's token list is empty for Base Sepolia, so `/quote` returns
+"No quotes available". However, `/check_approval` works. **All agents MUST call the Trading API
+first** (to log API key usage), then fall back to direct SwapRouter02 calls if `/quote` fails.
+See `agents/uniswap/shared/agentchain-protocol.md` for the complete API-first fallback strategy.
 
 ### Alkahest (Base Sepolia)
 ```
