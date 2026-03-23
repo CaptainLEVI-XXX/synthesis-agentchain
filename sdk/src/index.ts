@@ -44,8 +44,10 @@ export class AgentChain {
     );
   }
 
-  static create(config: AgentChainConfig & { relayUrl?: string }): AgentChain {
-    const client = createAgentChainClient(config);
+  /** Create an AgentChain SDK instance.
+   *  Now async because smart account creation requires an RPC call. */
+  static async create(config: AgentChainConfig & { relayUrl?: string }): Promise<AgentChain> {
+    const client = await createAgentChainClient(config);
     return new AgentChain(client, config.relayUrl);
   }
 }

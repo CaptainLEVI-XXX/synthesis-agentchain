@@ -159,6 +159,14 @@ export type AgentChainConfig = {
   rpcUrl?: string;
   privateKey?: Hex;
   contracts?: Partial<ContractAddresses>;
+  /** Pimlico bundler URL for ERC-4337 UserOperations.
+   *  Required for smart account write operations.
+   *  Default: https://public.pimlico.io/v2/{chainId}/rpc */
+  bundlerUrl?: string;
+  /** Salt for deterministic smart account deployment via SimpleFactory.
+   *  Each agent should use a unique salt (e.g., keccak256("my-agent-name")).
+   *  If not provided, writes go through the EOA directly (no smart account). */
+  smartAccountSalt?: Hex;
 };
 
 // ─── Error Types ─────────────────────────────────────────

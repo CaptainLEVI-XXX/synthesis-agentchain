@@ -1,58 +1,35 @@
 import {
   type Address,
   type Hex,
-  encodePacked,
   keccak256,
-  encodeAbiParameters,
-  parseAbiParameters,
+  toBytes,
 } from 'viem';
-import type { PrivateKeyAccount } from 'viem/accounts';
-import { SimpleFactoryAbi } from '../abis/external/SimpleFactory.js';
 import type { AgentChainClient } from '../client.js';
 
 export class AccountsModule {
   constructor(private readonly client: AgentChainClient) {}
 
-  async createAgentAccount(params: {
-    signer: PrivateKeyAccount;
-    salt?: bigint;
-  }): Promise<{ address: Address }> {
-    if (!this.client.walletClient) throw new Error('Wallet client required');
-
-    const salt = params.salt ?? 0n;
-    const saltBytes = keccak256(
-      encodePacked(['address', 'uint256'], [params.signer.address, salt]),
-    ) as Hex;
-
-    const initData = encodeAbiParameters(
-      parseAbiParameters('address'),
-      [params.signer.address],
-    );
-
-    const hash = await this.client.walletClient.writeContract({
-      address: this.client.addresses.simpleFactory,
-      abi: SimpleFactoryAbi,
-      functionName: 'deploy',
-      args: [this.client.addresses.delegationManager, initData, saltBytes],
-    } as any);
-
-    const receipt = await this.client.publicClient.waitForTransactionReceipt({ hash });
-
-    const deployedAddress = receipt.logs[0]?.address as Address;
-    if (!deployedAddress) {
-      throw new Error('Failed to extract deployed account address from transaction logs');
+  /** Get the smart account address (deterministic from salt).
+   *  Returns the address without deploying — the account gets deployed
+   *  on the first UserOperation automatically. */
+  getSmartAccountAddress(): Address {
+    if (!this.client.smartAccount) {
+      throw new Error('Smart account not configured. Provide smartAccountSalt in config.');
     }
-
-    return { address: deployedAddress };
+    return this.client.smartAccount.address;
   }
 
-  async getAccountAddress(signer: Address, salt?: bigint): Promise<Address> {
-    const saltValue = salt ?? 0n;
-    const saltBytes = keccak256(
-      encodePacked(['address', 'uint256'], [signer, saltValue]),
-    );
-    // Deterministic CREATE2 address — requires init code hash for full computation.
-    // For now, returns a hash-based placeholder.
-    return `0x${saltBytes.slice(26)}` as Address;
+  /** Check if the smart account is already deployed on-chain. */
+  async isDeployed(): Promise<boolean> {
+    if (!this.client.smartAccount) return false;
+    return this.client.smartAccount.isDeployed();
+  }
+
+  /** Generate a deterministic salt from a human-readable name.
+   *  Use this to create predictable smart account addresses:
+   *  const salt = AccountsModule.saltFromName("my-agent");
+   *  const client = await createAgentChainClient({ ..., smartAccountSalt: salt }); */
+  static saltFromName(name: string): Hex {
+    return keccak256(toBytes(name));
   }
 }

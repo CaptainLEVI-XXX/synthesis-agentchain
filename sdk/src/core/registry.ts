@@ -1,13 +1,17 @@
 import {
   type Address,
   type Hex,
-  type TransactionReceipt,
   keccak256,
   encodePacked,
 } from 'viem';
 import { AgentRegistryAbi } from '../abis/AgentRegistry.js';
 import type { AgentInfo } from '../types/index.js';
 import type { AgentChainClient } from '../client.js';
+import { sendWrite, sendBatchWrite } from '../client.js';
+
+const ERC20_APPROVE_ABI = [
+  { name: 'approve', type: 'function', inputs: [{ type: 'address' }, { type: 'uint256' }], outputs: [{ type: 'bool' }], stateMutability: 'nonpayable' },
+] as const;
 
 export function capToBytes32(cap: string): Hex {
   return keccak256(encodePacked(['string'], [cap]));
@@ -20,17 +24,6 @@ export class RegistryModule {
     return this.client.addresses.agentRegistry;
   }
 
-  private async write(fn: string, args: any[]): Promise<TransactionReceipt> {
-    if (!this.client.walletClient) throw new Error('Wallet client required for write operations');
-    const hash = await this.client.walletClient.writeContract({
-      address: this.addr,
-      abi: AgentRegistryAbi,
-      functionName: fn,
-      args,
-    } as any);
-    return this.client.publicClient.waitForTransactionReceipt({ hash });
-  }
-
   private async read(fn: string, args?: any[]): Promise<any> {
     return this.client.publicClient.readContract({
       address: this.addr,
@@ -40,37 +33,62 @@ export class RegistryModule {
     } as any);
   }
 
+  /** Register agent and stake USDC in a single UserOp (batched: approve + registerAndStake).
+   *  The smart account must have USDC balance for the stake. */
   async registerAndStake(params: {
     name: string;
     erc8004Id: bigint;
     capabilities: string[];
     endpoint: string;
     stakeAmount: bigint;
-  }) {
+  }): Promise<Hex> {
     const caps = params.capabilities.map(capToBytes32);
-    return this.write('registerAndStake', [params.name, params.erc8004Id, caps, params.endpoint, params.stakeAmount]);
+
+    // Batch: approve USDC + registerAndStake in one UserOp
+    return sendBatchWrite(this.client, [
+      {
+        to: this.client.addresses.usdc,
+        abi: ERC20_APPROVE_ABI,
+        functionName: 'approve',
+        args: [this.addr, params.stakeAmount],
+      },
+      {
+        to: this.addr,
+        abi: AgentRegistryAbi,
+        functionName: 'registerAndStake',
+        args: [params.name, params.erc8004Id, caps, params.endpoint, params.stakeAmount],
+      },
+    ]);
   }
 
-  async register(params: {
-    name: string;
-    erc8004Id: bigint;
-    capabilities: string[];
-    endpoint: string;
-  }) {
-    const caps = params.capabilities.map(capToBytes32);
-    return this.write('register', [params.name, params.erc8004Id, caps, params.endpoint]);
+  async addStake(amount: bigint): Promise<Hex> {
+    return sendBatchWrite(this.client, [
+      { to: this.client.addresses.usdc, abi: ERC20_APPROVE_ABI, functionName: 'approve', args: [this.addr, amount] },
+      { to: this.addr, abi: AgentRegistryAbi, functionName: 'addStake', args: [amount] },
+    ]);
   }
 
-  async addStake(amount: bigint) { return this.write('addStake', [amount]); }
-  async unstake(amount: bigint) { return this.write('unstake', [amount]); }
-
-  async updateCapabilities(capabilities: string[]) {
-    return this.write('updateCapabilities', [capabilities.map(capToBytes32)]);
+  async unstake(amount: bigint): Promise<Hex> {
+    return sendWrite(this.client, this.addr, AgentRegistryAbi, 'unstake', [amount]);
   }
 
-  async updateEndpoint(endpoint: string) { return this.write('updateEndpoint', [endpoint]); }
-  async linkENSName(ensName: string) { return this.write('linkENSName', [ensName]); }
-  async deactivate() { return this.write('deactivate', []); }
+  async updateCapabilities(capabilities: string[]): Promise<Hex> {
+    return sendWrite(this.client, this.addr, AgentRegistryAbi, 'updateCapabilities', [capabilities.map(capToBytes32)]);
+  }
+
+  async updateEndpoint(endpoint: string): Promise<Hex> {
+    return sendWrite(this.client, this.addr, AgentRegistryAbi, 'updateEndpoint', [endpoint]);
+  }
+
+  async linkENSName(ensName: string): Promise<Hex> {
+    return sendWrite(this.client, this.addr, AgentRegistryAbi, 'linkENSName', [ensName]);
+  }
+
+  async deactivate(): Promise<Hex> {
+    return sendWrite(this.client, this.addr, AgentRegistryAbi, 'deactivate', []);
+  }
+
+  // ─── Read Operations (unchanged — no UserOps needed) ──
 
   async getAgent(address: Address): Promise<AgentInfo> {
     const [agentData, stake] = await Promise.all([
