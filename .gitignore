@@ -1,25 +1,28 @@
 # Foundry
 contracts/cache/
 contracts/out/
-
-# Ignores development broadcast logs
-!/contracts/broadcast
-contracts/broadcast/*/31337/
-contracts/broadcast/**/dry-run/
-
+contracts/broadcast/
 
 # SDK
 sdk/node_modules/
 sdk/dist/
 
-# Dotenv files
-.env
-contracts/.env
-
-.claude
-docs/hackathon-credentials.md
-
-docs/
-
+# Agents
 agents/uniswap/node_modules/
 agents/uniswap/dist/
+agents/uniswap/*/inbox/
+agents/uniswap/*/outbox/
+
+# Demo
+demo/node_modules/
+
+# Dotenv / secrets
+.env
+contracts/.env
+.claude/
+
+# Docs (internal only — not for GitHub)
+docs/
+
+# Lock files
+skills-lock.json
