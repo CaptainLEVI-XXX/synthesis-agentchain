@@ -1,4 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
+import { join } from 'node:path';
 import type {
   TaskRequest,
   TaskResponse,
@@ -7,24 +9,40 @@ import type {
   AgentServerConfig,
 } from './types.js';
 
-type TaskHandler = (req: TaskRequest) => Promise<TaskResponse>;
-
 /**
- * Creates an HTTP server for an AgentChain agent.
+ * AgentChain Agent Server — File-based message bus for Claude Code agents.
+ *
+ * When a task arrives via HTTP POST /task:
+ *   1. Writes task to inbox/{taskId}.json
+ *   2. Prints task details to console (so the Claude session sees it)
+ *   3. Polls for outbox/{taskId}.json (the Claude session writes this after processing)
+ *   4. Returns the result as HTTP response
+ *
+ * The Claude Code agent session:
+ *   1. Sees "NEW TASK" in console output
+ *   2. Reads inbox/{taskId}.json
+ *   3. Processes it using SKILL.md (real on-chain calls, Trading API, etc.)
+ *   4. Writes result to outbox/{taskId}.json
  *
  * Routes:
- *   POST /task     → receives sub-task from orchestrator, returns result
+ *   POST /task     → file-based task routing (waits for Claude to process)
  *   GET  /health   → health check
- *   GET  /info     → agent capabilities and status
+ *   GET  /info     → agent capabilities
  */
-export function createAgentServer(config: AgentServerConfig, handler: TaskHandler) {
+export function createAgentServer(config: AgentServerConfig) {
   const startTime = Date.now();
   let tasksCompleted = 0;
+
+  // Create inbox/outbox directories
+  const baseDir = config.workDir || process.cwd();
+  const inboxDir = join(baseDir, 'inbox');
+  const outboxDir = join(baseDir, 'outbox');
+  mkdirSync(inboxDir, { recursive: true });
+  mkdirSync(outboxDir, { recursive: true });
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', `http://localhost:${config.port}`);
 
-    // CORS headers for local development
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -36,24 +54,66 @@ export function createAgentServer(config: AgentServerConfig, handler: TaskHandle
     }
 
     try {
-      // ─── POST /task — receive and process sub-task ───
+      // ─── POST /task — receive task, write to inbox, wait for outbox ───
       if (req.method === 'POST' && url.pathname === '/task') {
         const body = await readBody(req);
         const taskReq: TaskRequest = JSON.parse(body);
+        const taskId = taskReq.taskId;
 
-        console.log(`[${config.name}] Received task: ${taskReq.subIntent}`);
+        // Write task to inbox
+        const inboxFile = join(inboxDir, `${taskId}.json`);
+        writeFileSync(inboxFile, JSON.stringify(taskReq, null, 2));
 
-        const result = await handler(taskReq);
-        tasksCompleted++;
+        // Print prominently so Claude session sees it
+        console.log('');
+        console.log('═══════════════════════════════════════════════════════');
+        console.log(`  NEW TASK RECEIVED — ${config.name}`);
+        console.log('═══════════════════════════════════════════════════════');
+        console.log(`  Task ID:    ${taskId}`);
+        console.log(`  Intent:     ${taskReq.subIntent}`);
+        console.log(`  From:       ${taskReq.callerAddress}`);
+        console.log(`  Inbox file: ${inboxFile}`);
+        console.log('');
+        console.log('  → Read the task file and process it according to your SKILL.md');
+        console.log(`  → Write result to: outbox/${taskId}.json`);
+        console.log('═══════════════════════════════════════════════════════');
+        console.log('');
 
-        console.log(`[${config.name}] Completed: ${result.summary}`);
+        // Poll for outbox result (timeout: 5 minutes)
+        const outboxFile = join(outboxDir, `${taskId}.json`);
+        const timeout = 300_000;
+        const pollInterval = 1_000;
+        const startPoll = Date.now();
+
+        const result = await new Promise<TaskResponse>((resolve, reject) => {
+          const poll = setInterval(() => {
+            if (existsSync(outboxFile)) {
+              clearInterval(poll);
+              try {
+                const data = readFileSync(outboxFile, 'utf-8');
+                const response: TaskResponse = JSON.parse(data);
+                unlinkSync(outboxFile); // clean up
+                unlinkSync(inboxFile);
+                tasksCompleted++;
+                resolve(response);
+              } catch (e: any) {
+                reject(new Error(`Failed to parse outbox: ${e.message}`));
+              }
+            } else if (Date.now() - startPoll > timeout) {
+              clearInterval(poll);
+              reject(new Error('Task timed out waiting for agent response (5 min)'));
+            }
+          }, pollInterval);
+        });
+
+        console.log(`[${config.name}] Task completed: ${result.summary}`);
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
         return;
       }
 
-      // ─── GET /health — health check ─────────────────
+      // ─── GET /health ─────────────────────────────────────
       if (req.method === 'GET' && url.pathname === '/health') {
         const health: HealthResponse = {
           status: 'ok',
@@ -66,11 +126,11 @@ export function createAgentServer(config: AgentServerConfig, handler: TaskHandle
         return;
       }
 
-      // ─── GET /info — agent info ─────────────────────
+      // ─── GET /info ───────────────────────────────────────
       if (req.method === 'GET' && url.pathname === '/info') {
         const info: AgentInfoResponse = {
           name: config.name,
-          address: '0x0000000000000000000000000000000000000000' as any, // set after registration
+          address: config.smartAccount,
           capabilities: config.capabilities,
           endpoint: `http://localhost:${config.port}`,
           minFee: config.minFee.toString(),
@@ -82,7 +142,6 @@ export function createAgentServer(config: AgentServerConfig, handler: TaskHandle
         return;
       }
 
-      // ─── 404 ────────────────────────────────────────
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Not found' }));
     } catch (err: any) {
@@ -95,9 +154,16 @@ export function createAgentServer(config: AgentServerConfig, handler: TaskHandle
   return {
     start: () => {
       server.listen(config.port, () => {
-        console.log(`[${config.name}] listening on http://localhost:${config.port}`);
+        console.log('');
+        console.log(`[${config.name}] Agent server started`);
+        console.log(`  HTTP:         http://localhost:${config.port}`);
+        console.log(`  Smart Acct:   ${config.smartAccount}`);
         console.log(`  Capabilities: ${config.capabilities.join(', ')}`);
-        console.log(`  Min fee: ${Number(config.minFee) / 1e6} USDC`);
+        console.log(`  Inbox:        ${inboxDir}/`);
+        console.log(`  Outbox:       ${outboxDir}/`);
+        console.log('');
+        console.log('  Waiting for tasks...');
+        console.log('');
       });
     },
     stop: () => server.close(),

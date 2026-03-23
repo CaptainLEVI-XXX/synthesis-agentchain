@@ -1,44 +1,32 @@
-import { keccak256, toHex } from 'viem';
-import { createAgentServer } from '../shared/server-base.js';
-import type { TaskRequest, TaskResponse, AgentServerConfig } from '../shared/types.js';
+/**
+ * SwapAgent — HTTP message bus
+ *
+ * This server is just the communication layer. The intelligence lives in the
+ * Claude Code session running in this terminal, guided by SKILL.md.
+ *
+ * When a task arrives:
+ *   1. Task is written to inbox/{taskId}.json
+ *   2. Console prints task details
+ *   3. The Claude Code session (you) reads the task and processes it
+ *   4. You write the result to outbox/{taskId}.json
+ *   5. Server picks up the result and returns it via HTTP
+ *
+ * Start: npx tsx server.ts
+ */
 
-const config: AgentServerConfig = {
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createAgentServer } from '../shared/server-base.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const server = createAgentServer({
   name: 'SwapAgent',
   port: 3002,
-  privateKey: (process.env.SWAP_AGENT_KEY || '0x') as `0x${string}`,
+  smartAccount: '0x086d25AA4Ce248e1Ca493232D02a5eec768fB0d7',
   capabilities: ['uniswap-swap', 'uniswap-gasless'],
-  minFee: 2000000n, // 2 USDC
-  rpcUrl: process.env.BASE_RPC_URL || 'https://mainnet.base.org',
-  chain: 'base',
-};
+  minFee: 100000n, // 0.1 USDC
+  workDir: __dirname,
+});
 
-async function handleTask(req: TaskRequest): Promise<TaskResponse> {
-  console.log(`[SwapAgent] Processing: ${req.subIntent}`);
-
-  // In production: use /swap-integration plugin for the full
-  // Trading API flow: /check_approval → /quote → /swap or /order
-
-  const swapResult = {
-    type: 'CLASSIC',
-    tokenIn: '0x4200000000000000000000000000000000000006', // WETH
-    tokenOut: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', // USDC
-    amountIn: '1000000000000000000', // 1 ETH
-    amountOut: '2501230000', // 2501.23 USDC
-    txHash: '0x' + '0'.repeat(64), // placeholder
-    timestamp: Date.now(),
-  };
-
-  const resultHash = keccak256(toHex(JSON.stringify(swapResult)));
-
-  return {
-    taskId: req.taskId,
-    success: true,
-    resultHash,
-    summary: `SWAP_EXECUTED|type:CLASSIC|1 ETH -> 2501.23 USDC|txHash:${swapResult.txHash}`,
-    data: swapResult,
-    txHash: swapResult.txHash as `0x${string}`,
-  };
-}
-
-const server = createAgentServer(config, handleTask);
 server.start();

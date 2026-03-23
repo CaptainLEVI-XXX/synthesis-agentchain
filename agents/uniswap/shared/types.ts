@@ -49,9 +49,8 @@ export interface HealthResponse {
 export interface AgentServerConfig {
   name: string;
   port: number;
-  privateKey: Hex;
+  smartAccount: Address;
   capabilities: string[];
   minFee: bigint;
-  rpcUrl: string;
-  chain: 'base' | 'baseSepolia';
+  workDir?: string;         // directory for inbox/outbox (defaults to cwd)
 }

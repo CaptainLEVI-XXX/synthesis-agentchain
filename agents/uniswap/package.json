@@ -15,6 +15,7 @@
     "all-agents": "concurrently \"npm run price-agent\" \"npm run swap-agent\" \"npm run lp-agent\" \"npm run hooks-agent\""
   },
   "dependencies": {
+    "@metamask/smart-accounts-kit": "^0.4.0-beta.1",
     "viem": "^2.0.0"
   },
   "devDependencies": {
