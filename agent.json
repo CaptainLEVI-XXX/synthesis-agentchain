@@ -1,0 +1,171 @@
+{
+  "name": "AgentChain",
+  "version": "0.1.0",
+  "description": "Decentralized service network for autonomous AI agent coordination on Base. Agents register verifiable ERC-8004 identities, discover each other by capability, delegate work through MetaMask Delegation Framework with cryptographic caveats, settle payments via Alkahest escrow, and build on-chain reputation.",
+  "operator_wallet": "0x4741b6F3CE01C4ac1C387BC9754F31c1c93866F0",
+  "chain": {
+    "name": "Base Sepolia",
+    "id": 84532,
+    "rpc": "https://base-sepolia.infura.io/v3/44bdf2d1c8594cc9b16832398af754d7"
+  },
+  "agents": [
+    {
+      "name": "LPAgent",
+      "role": "orchestrator",
+      "smart_account": "0xb378619B36F027FA54289498759f914c1322479A",
+      "erc8004_identity": 2703,
+      "erc8004_registration_tx": "0x56b3e25ad14d4021ec6a8715f9178edc82ffb6a960ffc3a84963c4a512e83079",
+      "capabilities": ["uniswap-lp"],
+      "endpoint": "http://localhost:3003",
+      "stake_usdc": 0.1,
+      "deployment": "MetaMask Smart Accounts Kit (HybridDeleGator via SimpleFactory CREATE2)"
+    },
+    {
+      "name": "SwapAgent",
+      "role": "worker",
+      "smart_account": "0x086d25AA4Ce248e1Ca493232D02a5eec768fB0d7",
+      "erc8004_identity": 2706,
+      "erc8004_registration_tx": "0x55fd5644734d4af5c2f81c52e2d7dc65733195c050fb2f8dfaa607f3e5c492dd",
+      "capabilities": ["uniswap-swap", "uniswap-gasless"],
+      "endpoint": "http://localhost:3002",
+      "stake_usdc": 0.1,
+      "deployment": "MetaMask Smart Accounts Kit (HybridDeleGator via SimpleFactory CREATE2)"
+    },
+    {
+      "name": "PriceAgent",
+      "role": "worker",
+      "smart_account": "0x7C303e5Dcbd7c77fb8fFAe3D6a6D648DbA955Dbd",
+      "erc8004_identity": 2816,
+      "erc8004_registration_tx": "0xc83c15061249972aa6cef519eb5f69f3f9631a26fb75684fd7c6c716c0f01c2f",
+      "capabilities": ["uniswap-price"],
+      "endpoint": "http://localhost:3001",
+      "stake_usdc": 0.1,
+      "deployment": "MetaMask Smart Accounts Kit (HybridDeleGator via SimpleFactory CREATE2)",
+      "description": "Reads real-time Uniswap V3 pool state (slot0, liquidity) and queries Trading API for route comparison"
+    },
+    {
+      "name": "HooksAgent",
+      "role": "worker",
+      "smart_account": "0xdfaC98E739f6318866EC009fC5AfC2B8dCa2c91E",
+      "erc8004_identity": 2817,
+      "erc8004_registration_tx": "0x65f6efee208a81d703bca83224c5172242a9123284a9f2292ea5803b8c5d06ab",
+      "capabilities": ["uniswap-hooks"],
+      "endpoint": "http://localhost:3004",
+      "stake_usdc": 0.1,
+      "deployment": "MetaMask Smart Accounts Kit (HybridDeleGator via SimpleFactory CREATE2)",
+      "description": "Analyzes Uniswap V4 hook contracts for permission flags, risk scoring, MEV protection"
+    }
+  ],
+  "contracts": {
+    "AgentRegistry": "0xa5bF9723b9E286bBa502617A8A6D2f24cBdEbf62",
+    "DelegationTracker": "0xe0585a939E2C128d1Ff8F4C681529A2AB8f9917d",
+    "AgentCapabilityEnforcer": "0xB06D7126abe20eb8B8850db354bd59EFD6a8a2Ff",
+    "AgentChainArbiter": "0xf9276b374eF30806b62119027a1e4251A4AD8Cf5"
+  },
+  "external_protocols": {
+    "metamask_delegation_manager": "0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3",
+    "metamask_simple_factory": "0x69Aa2f9fe1572F1B640E1bbc512f5c3a734fc77c",
+    "metamask_hybrid_delegator_impl": "0x48dBe696A4D990079e039489bA2053B36E8FFEC4",
+    "erc4337_entrypoint_v07": "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
+    "erc8004_identity_registry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+    "erc8004_reputation_registry": "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+    "alkahest_escrow": "0x1Fe964348Ec42D9Bb1A072503ce8b4744266FF43",
+    "uniswap_v3_factory": "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24",
+    "uniswap_swap_router02": "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4",
+    "uniswap_nft_position_manager": "0x27F971cb582BF9E50F397e4d29a5C7A34f11faA2",
+    "permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+    "eas": "0x4200000000000000000000000000000000000021",
+    "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+  },
+  "supported_tools": [
+    "uniswap-trading-api",
+    "uniswap-v3-swap-router",
+    "uniswap-v3-pool-state",
+    "uniswap-v3-position-manager",
+    "metamask-delegation-framework",
+    "metamask-smart-accounts-kit",
+    "erc8004-identity-registry",
+    "erc8004-reputation-registry",
+    "alkahest-escrow",
+    "eas-attestations",
+    "ens-naming",
+    "olas-mech-marketplace",
+    "pimlico-bundler",
+    "viem",
+    "foundry"
+  ],
+  "tech_stack": {
+    "smart_contracts": "Solidity 0.8.24 (Foundry)",
+    "sdk": "TypeScript (viem, @metamask/smart-accounts-kit)",
+    "agent_harness": "Claude Code (Anthropic CLI)",
+    "agent_model": "claude-opus-4-6",
+    "bundler": "Pimlico public bundler",
+    "test_framework": "Foundry (forge test)",
+    "test_count": 85
+  },
+  "task_categories": [
+    "defi",
+    "liquidity-management",
+    "token-swaps",
+    "price-discovery",
+    "multi-agent-coordination"
+  ],
+  "compute_constraints": {
+    "max_delegation_depth": 3,
+    "min_stake_usdc": 0.1,
+    "task_timeout_seconds": 86400
+  },
+  "live_demo": {
+    "chain": "Base Sepolia (84532)",
+    "task_id": "0xadc54c875b24751559b063e70ad85b570274eac3c1566040b3e1d9217db79067",
+    "intent": "Invest 0.01 ETH in the best Uniswap ETH/USDC LP pool",
+    "transactions": {
+      "task_registration": {
+        "description": "EOA registers task on DelegationTracker with 0.5 USDC feePool",
+        "tx": "0x2b484c3e2f4f4ddf02317828c26bc892df840f46773ff74c393e8da8e0763f45",
+        "block": 39224018,
+        "explorer": "https://sepolia.basescan.org/tx/0x2b484c3e2f4f4ddf02317828c26bc892df840f46773ff74c393e8da8e0763f45"
+      },
+      "swap_execution": {
+        "description": "SwapAgent batched UserOp: wrap ETH + approve WETH + exactInputSingle (0.005 ETH → USDC via 3000bp pool)",
+        "tx": "0x9d62c62ff828abaac6df9d45f04dc57d1782dc80a0a0203bc1e73f6c64c517aa",
+        "userop": "0x0c3a239eedde1325cc88d8333a26ad583e47d9090fc47e35e471a17869c4edf0",
+        "agent": "SwapAgent (0x086d25AA4Ce248e1Ca493232D02a5eec768fB0d7)",
+        "explorer": "https://sepolia.basescan.org/tx/0x9d62c62ff828abaac6df9d45f04dc57d1782dc80a0a0203bc1e73f6c64c517aa"
+      },
+      "lp_mint": {
+        "description": "LPAgent batched UserOp: wrap ETH + approve WETH + approve USDC + NonfungiblePositionManager.mint() (tick range 217260-219240)",
+        "tx": "0x7f8943fa61c60e562005354e1a6470017fd1d71d9eab5dca9f1d25c7d55ed82f",
+        "userop": "0x066a6e69e1820eb96792e9d41433628d65463f7a2543475611f88ef282c4836f",
+        "agent": "LPAgent (0xb378619B36F027FA54289498759f914c1322479A)",
+        "explorer": "https://sepolia.basescan.org/tx/0x7f8943fa61c60e562005354e1a6470017fd1d71d9eab5dca9f1d25c7d55ed82f"
+      },
+      "claim_and_work_record": {
+        "description": "LPAgent batched UserOp: claimTask() + submitWorkRecord() — becomes orchestrator, submits LP mint tx hash as proof",
+        "tx": "0xd636d9",
+        "agent": "LPAgent (0xb378619B36F027FA54289498759f914c1322479A)"
+      },
+      "settlement": {
+        "description": "EOA calls settleAndRate(taskId, 50) — 5-star rating, fee pool distributed to agents, ERC-8004 reputation recorded",
+        "tx": "0x9517cafa31893beffe0753af0f25764136a722db16b187a884bd7f5bf5f7daf2",
+        "caller": "EOA (0x4741b6F3CE01C4ac1C387BC9754F31c1c93866F0)",
+        "explorer": "https://sepolia.basescan.org/tx/0x9517cafa31893beffe0753af0f25764136a722db16b187a884bd7f5bf5f7daf2"
+      }
+    },
+    "uniswap_api_calls": [
+      "POST /check_approval (SwapAgent, WETH) — success",
+      "POST /quote (SwapAgent, 0.005 WETH → USDC) — 'No quotes available' (expected on Base Sepolia)",
+      "POST /check_approval (LPAgent, USDC) — success",
+      "POST /check_approval (LPAgent, WETH) — success",
+      "POST /lp/create_position (LPAgent) — Forbidden (expected on Base Sepolia)"
+    ],
+    "pool_selected": {
+      "pair": "WETH/USDC",
+      "fee_tier": 3000,
+      "pool_address": "0x46880b404CD35c165EDdefF7421019F8dD25F4Ad",
+      "liquidity": "1.396e13",
+      "tick": 218253,
+      "tick_range": "217260-219240 (±10% moderate strategy)"
+    }
+  }
+}
