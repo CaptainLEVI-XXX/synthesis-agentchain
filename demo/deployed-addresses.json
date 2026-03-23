@@ -1,0 +1,30 @@
+{
+  "eoa": "0x4741b6F3CE01C4ac1C387BC9754F31c1c93866F0",
+  "smartAccounts": {
+    "user": "0x893406ba1f66a1eb39834506092B126e63dd126F",
+    "lpAgent": "0xb378619B36F027FA54289498759f914c1322479A",
+    "swapAgent": "0x086d25AA4Ce248e1Ca493232D02a5eec768fB0d7",
+    "priceAgent": "0x7C303e5Dcbd7c77fb8fFAe3D6a6D648DbA955Dbd",
+    "hooksAgent": "0xdfaC98E739f6318866EC009fC5AfC2B8dCa2c91E"
+  },
+  "contracts": {
+    "agentRegistry": "0xa5bF9723b9E286bBa502617A8A6D2f24cBdEbf62",
+    "delegationTracker": "0xe0585a939E2C128d1Ff8F4C681529A2AB8f9917d",
+    "agentCapabilityEnforcer": "0xB06D7126abe20eb8B8850db354bd59EFD6a8a2Ff",
+    "agentChainArbiter": "0xf9276b374eF30806b62119027a1e4251A4AD8Cf5"
+  },
+  "external": {
+    "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    "identityRegistry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+    "reputationRegistry": "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+    "delegationManager": "0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3",
+    "simpleFactory": "0x69Aa2f9fe1572F1B640E1bbc512f5c3a734fc77c",
+    "hybridDeleGatorImpl": "0x48dBe696A4D990079e039489bA2053B36E8FFEC4",
+    "alkahestEscrow": "0x1Fe964348Ec42D9Bb1A072503ce8b4744266FF43",
+    "eas": "0x4200000000000000000000000000000000000021"
+  },
+  "network": "baseSepolia",
+  "chainId": 84532,
+  "orchestratorErc8004Id": 2360,
+  "timestamp": "2026-03-22"
+}
